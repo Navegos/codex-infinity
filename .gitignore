@@ -96,3 +96,4 @@ __pycache__/
 *.pyc
 
 codex-cli/vendor/
+build_output.txt
