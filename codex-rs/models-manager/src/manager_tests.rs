@@ -1150,7 +1150,7 @@ fn gpt_5_6_prompts_are_concise_and_require_end_to_end_completion() {
             .unwrap_or_else(|| panic!("{slug} should have an instructions template"));
 
         assert!(
-            instructions.len() < 10_000,
+            instructions.len() < 4_000,
             "{slug} prompt should stay concise"
         );
         assert!(
