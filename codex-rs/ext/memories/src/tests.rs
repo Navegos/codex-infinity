@@ -41,7 +41,8 @@ fn tools_are_not_contributed_without_thread_config() {
         extension
             .tools(
                 &ExtensionData::new("session"),
-                &ExtensionData::new("thread")
+                &ExtensionData::new("thread"),
+                &ExtensionData::new("step")
             )
             .is_empty()
     );
@@ -59,7 +60,11 @@ fn tools_are_not_contributed_when_disabled() {
 
     assert!(
         extension
-            .tools(&ExtensionData::new("session"), &thread_store)
+            .tools(
+                &ExtensionData::new("session"),
+                &thread_store,
+                &ExtensionData::new("step"),
+            )
             .is_empty()
     );
 }
@@ -76,7 +81,11 @@ fn tools_are_not_contributed_when_dedicated_tools_disabled() {
 
     assert!(
         extension
-            .tools(&ExtensionData::new("session"), &thread_store)
+            .tools(
+                &ExtensionData::new("session"),
+                &thread_store,
+                &ExtensionData::new("step"),
+            )
             .is_empty()
     );
 }
@@ -92,7 +101,11 @@ fn tools_are_contributed_when_enabled_with_dedicated_tools() {
     });
 
     let tool_names = extension
-        .tools(&ExtensionData::new("session"), &thread_store)
+        .tools(
+            &ExtensionData::new("session"),
+            &thread_store,
+            &ExtensionData::new("step"),
+        )
         .into_iter()
         .map(|tool| tool.tool_name())
         .collect::<Vec<_>>();
@@ -123,7 +136,13 @@ fn install_registers_dedicated_tool_contributor() {
     let tool_names = registry
         .tool_contributors()
         .iter()
-        .flat_map(|contributor| contributor.tools(&ExtensionData::new("session"), &thread_store))
+        .flat_map(|contributor| {
+            contributor.tools(
+                &ExtensionData::new("session"),
+                &thread_store,
+                &ExtensionData::new("step"),
+            )
+        })
         .map(|tool| tool.tool_name())
         .collect::<Vec<_>>();
 
@@ -181,7 +200,11 @@ async fn prompt_contribution_uses_memory_summary_when_enabled() {
     });
 
     let fragments = extension
-        .contribute_thread_context(&ExtensionData::new("session"), &thread_store)
+        .contribute_thread_context(
+            &ExtensionData::new("session"),
+            &thread_store,
+            &ExtensionData::new("step"),
+        )
         .await;
 
     assert_eq!(fragments.len(), 1);
@@ -212,6 +235,7 @@ async fn add_ad_hoc_note_tool_creates_note_file() {
             call_id: "call-1".to_string(),
             tool_name: memory_tool_name(crate::ADD_AD_HOC_NOTE_TOOL_NAME),
             model: "gpt-test".to_string(),
+            codex_turn_metadata: None,
             truncation_policy: TruncationPolicy::Bytes(1024),
             conversation_history: codex_extension_api::ConversationHistory::default(),
             turn_item_emitter: Arc::new(NoopTurnItemEmitter),
@@ -256,6 +280,7 @@ async fn add_ad_hoc_note_tool_rejects_paths_as_filenames() {
             call_id: "call-1".to_string(),
             tool_name: memory_tool_name(crate::ADD_AD_HOC_NOTE_TOOL_NAME),
             model: "gpt-test".to_string(),
+            codex_turn_metadata: None,
             truncation_policy: TruncationPolicy::Bytes(1024),
             conversation_history: codex_extension_api::ConversationHistory::default(),
             turn_item_emitter: Arc::new(NoopTurnItemEmitter),
@@ -301,6 +326,7 @@ async fn read_tool_reads_memory_file() {
             call_id: "call-1".to_string(),
             tool_name: memory_tool_name(crate::READ_TOOL_NAME),
             model: "gpt-test".to_string(),
+            codex_turn_metadata: None,
             truncation_policy: TruncationPolicy::Bytes(1024),
             conversation_history: codex_extension_api::ConversationHistory::default(),
             turn_item_emitter: Arc::new(NoopTurnItemEmitter),
@@ -349,6 +375,7 @@ async fn search_tool_accepts_multiple_queries() {
             call_id: "call-1".to_string(),
             tool_name: memory_tool_name(crate::SEARCH_TOOL_NAME),
             model: "gpt-test".to_string(),
+            codex_turn_metadata: None,
             truncation_policy: TruncationPolicy::Bytes(1024),
             conversation_history: codex_extension_api::ConversationHistory::default(),
             turn_item_emitter: Arc::new(NoopTurnItemEmitter),
@@ -423,6 +450,7 @@ async fn search_tool_accepts_windowed_all_match_mode() {
             call_id: "call-1".to_string(),
             tool_name: memory_tool_name(crate::SEARCH_TOOL_NAME),
             model: "gpt-test".to_string(),
+            codex_turn_metadata: None,
             truncation_policy: TruncationPolicy::Bytes(1024),
             conversation_history: codex_extension_api::ConversationHistory::default(),
             turn_item_emitter: Arc::new(NoopTurnItemEmitter),
@@ -477,6 +505,7 @@ async fn search_tool_rejects_legacy_single_query() {
             call_id: "call-1".to_string(),
             tool_name: memory_tool_name(crate::SEARCH_TOOL_NAME),
             model: "gpt-test".to_string(),
+            codex_turn_metadata: None,
             truncation_policy: TruncationPolicy::Bytes(1024),
             conversation_history: codex_extension_api::ConversationHistory::default(),
             turn_item_emitter: Arc::new(NoopTurnItemEmitter),

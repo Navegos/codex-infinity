@@ -13,6 +13,7 @@ use codex_extension_api::ExtensionFuture;
 use codex_extension_api::ExtensionRegistryBuilder;
 use codex_extension_api::PromptFragment;
 use codex_extension_api::PromptSlot;
+use codex_extension_api::SkillInvocationContributor;
 use codex_extension_api::ThreadLifecycleContributor;
 use codex_extension_api::TokenUsageContributor;
 use codex_extension_api::ToolCall;
@@ -40,6 +41,7 @@ impl ContextContributor for AllContributors {
         &'a self,
         _session_store: &'a ExtensionData,
         _thread_store: &'a ExtensionData,
+        _step_store: &'a ExtensionData,
     ) -> ExtensionFuture<'a, Vec<PromptFragment>> {
         Box::pin(std::future::ready(Vec::new()))
     }
@@ -53,6 +55,8 @@ impl ConfigContributor<()> for AllContributors {}
 
 impl TokenUsageContributor for AllContributors {}
 
+impl SkillInvocationContributor for AllContributors {}
+
 impl TurnInputContributor for AllContributors {
     fn contribute<'a>(
         &'a self,
@@ -60,6 +64,7 @@ impl TurnInputContributor for AllContributors {
         _session_store: &'a ExtensionData,
         _thread_store: &'a ExtensionData,
         _turn_store: &'a ExtensionData,
+        _step_store: &'a ExtensionData,
     ) -> ExtensionFuture<'a, Vec<Box<dyn ContextualUserFragment + Send>>> {
         Box::pin(async move {
             let _self = self;
@@ -74,6 +79,7 @@ impl ToolContributor for AllContributors {
         &self,
         _session_store: &ExtensionData,
         _thread_store: &ExtensionData,
+        _step_store: &ExtensionData,
     ) -> Vec<Arc<dyn ToolExecutor<ToolCall>>> {
         Vec::new()
     }
@@ -117,6 +123,7 @@ async fn build_round_trips_every_contributor_category() {
     builder.turn_lifecycle_contributor(contributor.clone());
     builder.config_contributor(contributor.clone());
     builder.token_usage_contributor(contributor.clone());
+    builder.skill_invocation_contributor(contributor.clone());
     builder.prompt_contributor(contributor.clone());
     builder.turn_input_contributor(contributor.clone());
     builder.tool_contributor(contributor.clone());
@@ -129,6 +136,7 @@ async fn build_round_trips_every_contributor_category() {
     assert_eq!(registry.turn_lifecycle_contributors().len(), 1);
     assert_eq!(registry.config_contributors().len(), 1);
     assert_eq!(registry.token_usage_contributors().len(), 1);
+    assert_eq!(registry.skill_invocation_contributors().len(), 1);
     assert_eq!(registry.context_contributors().len(), 1);
     assert_eq!(registry.turn_input_contributors().len(), 1);
     assert_eq!(registry.tool_contributors().len(), 1);
@@ -153,6 +161,7 @@ impl ContextContributor for NamedContextContributor {
         &'a self,
         _session_store: &'a ExtensionData,
         _thread_store: &'a ExtensionData,
+        _step_store: &'a ExtensionData,
     ) -> ExtensionFuture<'a, Vec<PromptFragment>> {
         Box::pin(std::future::ready(vec![PromptFragment::developer_policy(
             self.0,
@@ -214,12 +223,13 @@ async fn contributors_preserve_registration_order() {
     let session_store = ExtensionData::new("session");
     let thread_store = ExtensionData::new("thread");
     let turn_store = ExtensionData::new("turn");
+    let step_store = ExtensionData::new("step");
 
     let mut fragments = Vec::new();
     for contributor in registry.context_contributors() {
         fragments.extend(
             contributor
-                .contribute_thread_context(&session_store, &thread_store)
+                .contribute_thread_context(&session_store, &thread_store, &step_store)
                 .await,
         );
     }
@@ -232,6 +242,7 @@ async fn contributors_preserve_registration_order() {
                     session_store: &session_store,
                     thread_store: &thread_store,
                     turn_store: &turn_store,
+                    step_store: &step_store,
                     model_context_window: Some(123),
                 })
                 .await,
@@ -309,7 +320,10 @@ async fn approval_review_returns_first_claim_and_short_circuits() {
     for (name, decision) in [
         ("first", None),
         ("second", Some(ReviewDecision::Approved)),
-        ("third", Some(ReviewDecision::Denied)),
+        (
+            "third",
+            Some(ReviewDecision::denied("rejected by extension")),
+        ),
     ] {
         builder.approval_review_contributor(Arc::new(RecordingApprovalContributor {
             name,

@@ -6,8 +6,8 @@ codex_rust_crate(
         "codex-windows-sandbox-setup.manifest",
     ],
     crate_name = "codex_windows_sandbox",
-    build_script_data = [
-        "Cargo.toml",
-        "codex-windows-sandbox-setup.manifest",
+    test_data_extra = [
+        ":codex-command-runner",
+        ":codex-windows-sandbox-setup",
     ],
 )

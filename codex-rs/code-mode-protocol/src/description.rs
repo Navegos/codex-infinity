@@ -27,6 +27,8 @@ const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run JavaScript code to orchestrate/co
 - `exit()`: Immediately ends the current script successfully (like an early return from the top level).
 - `text(value: string | number | boolean | undefined | null)`: Appends a text item. Non-string values are stringified with `JSON.stringify(...)` when possible.
 - `image(imageUrlOrItem: string | { image_url: string; detail?: "auto" | "low" | "high" | "original" | null } | ImageContent, detail?: "auto" | "low" | "high" | "original" | null)`: Appends an image item. `image_url` can be an HTTPS URL or a base64-encoded `data:` URL. To forward an MCP tool image, pass an individual `ImageContent` block from `result.content`, for example `image(result.content[0])`. MCP image blocks may request detail with `_meta: { "codex/imageDetail": "original" }`. When provided, the second `detail` argument overrides any detail embedded in the first argument.
+- `audio(audioUrlOrItem: string | { audio_url: string } | AudioContent)`: Appends an audio item. `audio_url` should be a base64-encoded `data:` URL. To forward an MCP tool audio block, pass an individual `AudioContent` block from `result.content`, for example `audio(result.content[0])`.
+- `generatedImage(result: { image_url: string; output_hint?: string })`: Appends an image-generation result and its optional output hint. HTTP(S) URLs are not supported.
 - `store(key: string, value: any)`: stores a serializable value under a string key for later `exec` calls in the same session.
 - `load(key: string)`: returns the stored value for a string key, or `undefined` if it is missing.
 - `notify(value: string | number | boolean | undefined | null)`: immediately injects an extra `custom_tool_call_output` for the current `exec` call. Values are stringified like `text(...)`.
@@ -253,13 +255,17 @@ pub fn build_exec_tool_description(
     enabled_tools: &[ToolDefinition],
     deferred_tools: &[ToolDefinition],
     namespace_descriptions: &BTreeMap<String, ToolNamespaceDescription>,
+    default_exec_yield_time_ms: u64,
     code_mode_only: bool,
 ) -> String {
     let mut sections = Vec::new();
     if code_mode_only {
         sections.push(CODE_MODE_ONLY_PREFACE.to_string());
     }
-    sections.push(EXEC_DESCRIPTION_TEMPLATE.to_string());
+    sections.push(EXEC_DESCRIPTION_TEMPLATE.replace(
+        "Defaults to 10000 ms.",
+        &format!("Defaults to {default_exec_yield_time_ms} ms."),
+    ));
     if !deferred_tools.is_empty() {
         sections.push(DEFERRED_NESTED_TOOLS_GUIDANCE.to_string());
     }
@@ -871,6 +877,7 @@ mod tests {
             }],
             &[],
             &BTreeMap::new(),
+            crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ true,
         );
         assert!(description.contains(
@@ -881,8 +888,14 @@ bar"
 
     #[test]
     fn exec_description_mentions_timeout_helpers() {
-        let description =
-            build_exec_tool_description(&[], &[], &BTreeMap::new(), /*code_mode_only*/ false);
+        let description = build_exec_tool_description(
+            &[],
+            &[],
+            &BTreeMap::new(),
+            crate::DEFAULT_EXEC_YIELD_TIME_MS,
+            /*code_mode_only*/ false,
+        );
+        assert!(description.contains("`audio(audioUrlOrItem:"));
         assert!(description.contains("`setTimeout(callback: () => void, delayMs?: number)`"));
         assert!(description.contains("`clearTimeout(timeoutId?: number)`"));
     }
@@ -933,6 +946,7 @@ bar"
             ],
             &[],
             &namespace_descriptions,
+            crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ true,
         );
         assert_eq!(description.matches("## mcp__sample").count(), 1);
@@ -973,6 +987,7 @@ bar"
             }],
             &[],
             &namespace_descriptions,
+            crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ true,
         );
 
@@ -1072,6 +1087,7 @@ bar"
             ],
             &[],
             &BTreeMap::new(),
+            crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ true,
         );
 
@@ -1107,6 +1123,7 @@ bar"
             &[],
             &[deferred_tool],
             &BTreeMap::new(),
+            crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ true,
         );
 
@@ -1128,6 +1145,7 @@ bar"
                 output_schema: None,
             }],
             &BTreeMap::new(),
+            crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ false,
         );
 

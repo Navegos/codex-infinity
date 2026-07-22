@@ -1,5 +1,7 @@
 // Aggregates all former standalone integration tests as modules.
 use codex_apply_patch::CODEX_CORE_APPLY_PATCH_ARG1;
+#[cfg(unix)]
+use codex_exec_server::CODEX_ARG0_EXEC_HELPER_ARG1;
 use codex_exec_server::CODEX_FS_HELPER_ARG1;
 use codex_sandboxing::landlock::CODEX_LINUX_SANDBOX_ARG0;
 use codex_test_binary_support::TestBinaryDispatchGuard;
@@ -17,6 +19,10 @@ pub static CODEX_ALIASES_TEMP_DIR: Option<TestBinaryDispatchGuard> = {
         if argv1 == Some(CODEX_CORE_APPLY_PATCH_ARG1) {
             return TestBinaryDispatchMode::DispatchArg0Only;
         }
+        #[cfg(unix)]
+        if argv1 == Some(CODEX_ARG0_EXEC_HELPER_ARG1) {
+            return TestBinaryDispatchMode::DispatchArg0Only;
+        }
         if argv1 == Some(CODEX_FS_HELPER_ARG1) {
             return TestBinaryDispatchMode::DispatchArg0Only;
         }
@@ -31,13 +37,14 @@ pub static CODEX_ALIASES_TEMP_DIR: Option<TestBinaryDispatchGuard> = {
 mod abort_tasks;
 mod additional_context;
 mod agent_execution;
-mod agent_jobs;
 mod agent_websocket;
 mod agents_md;
 mod apply_patch_cli;
 #[cfg(not(target_os = "windows"))]
 mod approvals;
+mod audio_truncation;
 mod auto_review;
+mod catalog_permission_messages;
 mod cli_stream;
 mod client;
 mod client_websockets;
@@ -71,6 +78,7 @@ mod mcp_auth_elicitation;
 mod mcp_auth_refresh;
 #[cfg(unix)]
 mod mcp_refresh_cleanup;
+mod mcp_tool_cache;
 mod mcp_tool_exposure;
 mod mcp_turn_metadata;
 mod model_overrides;
@@ -80,6 +88,9 @@ mod model_visible_layout;
 mod models_cache_ttl;
 mod models_etag_responses;
 mod multi_agent_mode;
+mod multi_agent_resume;
+#[cfg(unix)]
+mod multi_exec_server_sandbox;
 mod network_approval;
 mod openai_file_mcp;
 mod otel;
@@ -87,12 +98,13 @@ mod override_updates;
 mod pending_input;
 mod permissions_messages;
 mod personality;
-mod personality_migration;
 mod plugins;
+mod prompt_cache_key;
 mod prompt_caching;
 mod prompt_debug_tests;
 mod quota_exceeded;
 mod realtime_conversation;
+mod realtime_initial_items;
 mod remote_env;
 mod remote_models;
 mod request_compression;
@@ -118,6 +130,7 @@ mod shell_serialization;
 mod shell_snapshot;
 mod skill_approval;
 mod skills;
+mod skills_extension;
 mod spawn_agent_description;
 mod sqlite_state;
 mod stream_error_allows_next_turn;
@@ -142,3 +155,4 @@ mod websocket_fallback;
 mod window_headers;
 #[cfg(target_os = "windows")]
 mod windows_sandbox;
+mod workspace_roots;

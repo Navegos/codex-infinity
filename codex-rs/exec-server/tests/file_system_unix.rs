@@ -235,6 +235,7 @@ async fn remote_read_file_materializes_environment_workspace_roots() -> Result<(
             value: FileSystemSpecialPath::project_roots(/*subpath*/ None),
         },
         access: FileSystemAccessMode::Read,
+        missing_path_behavior: None,
     }]);
     let mut sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
         PermissionProfile::from_runtime_permissions(&policy, NetworkSandboxPolicy::Restricted),
@@ -258,6 +259,36 @@ async fn remote_read_file_materializes_environment_workspace_roots() -> Result<(
         )
         .await
         .expect_err("read outside environment workspace roots should fail");
+    assert_sandbox_denied(&error);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_read_file_preserves_empty_workspace_roots() -> Result<()> {
+    let context = create_file_system_context(FileSystemImplementation::Remote).await?;
+    let file_system = context.file_system;
+    let tmp = TempDir::new()?;
+    let file = tmp.path().join("excluded.txt");
+    std::fs::write(&file, b"excluded")?;
+
+    let policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
+        path: FileSystemPath::Special {
+            value: FileSystemSpecialPath::project_roots(/*subpath*/ None),
+        },
+        access: FileSystemAccessMode::Read,
+        missing_path_behavior: None,
+    }]);
+    let mut sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
+        PermissionProfile::from_runtime_permissions(&policy, NetworkSandboxPolicy::Restricted),
+        PathUri::from_host_native_path(tmp.path())?,
+    );
+    sandbox.workspace_roots.clear();
+
+    let error = file_system
+        .read_file(&PathUri::from_host_native_path(&file)?, Some(&sandbox))
+        .await
+        .expect_err("empty workspace roots should not grant cwd access");
     assert_sandbox_denied(&error);
 
     Ok(())
