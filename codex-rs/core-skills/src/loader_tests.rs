@@ -1580,6 +1580,7 @@ async fn loads_markdown_skill_without_frontmatter() {
             path_to_skills_md: normalized(&skill_path),
             scope: SkillScope::User,
             plugin_id: None,
+            remote_plugin_id: None,
         }]
     );
 }
@@ -1613,6 +1614,7 @@ async fn loads_markdown_skill_without_frontmatter_using_first_body_line() {
             path_to_skills_md: normalized(&skill_path),
             scope: SkillScope::User,
             plugin_id: None,
+            remote_plugin_id: None,
         }]
     );
 }

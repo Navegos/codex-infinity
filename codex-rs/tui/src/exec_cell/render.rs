@@ -374,44 +374,9 @@ impl ExecCell {
             },
         ]));
 
-        let mut calls = self.calls.as_slice();
         let mut out_indented = Vec::new();
-        while let Some((call, remaining)) = calls.split_first() {
-            let reads_only = call
-                .parsed
-                .iter()
-                .all(|parsed| matches!(parsed, ParsedCommand::Read { .. }));
-            let group_len = if reads_only {
-                1 + remaining
-                    .iter()
-                    .take_while(|next| {
-                        next.parsed
-                            .iter()
-                            .all(|parsed| matches!(parsed, ParsedCommand::Read { .. }))
-                    })
-                    .count()
-            } else {
-                1
-            };
-            let (group, remaining) = calls.split_at(group_len);
-            calls = remaining;
-
-            let call_lines: Vec<(String, Vec<Span<'static>>)> = if reads_only {
-                let names = group
-                    .iter()
-                    .flat_map(|call| &call.parsed)
-                    .map(|parsed| match parsed {
-                        ParsedCommand::Read { name, .. } => name.clone(),
-                        _ => unreachable!(),
-                    })
-                    .unique();
-                vec![(
-                    "Read".to_string(),
-                    Itertools::intersperse(names.into_iter().map(Into::into), ", ".dim()).collect(),
-                )]
-            } else {
-                call.parsed.iter().map(command_detail_line).collect()
-            };
+        for call in self.calls.iter() {
+            let call_lines = call.parsed.iter().map(command_detail_line);
 
             for (title, line) in call_lines {
                 let line = Line::from(line);
@@ -1242,11 +1207,10 @@ mod tests {
                 name: "main.rs".into(),
                 path: "src/main.rs".into(),
             }],
-            output: Some(CommandOutput {
-                exit_code: 0,
-                aggregated_output: "fn main() { let value = 1; }".to_string(),
-                formatted_output: "fn main() { let value = 1; }".to_string(),
-            }),
+            output: Some(CommandOutput::new(
+                /*exit_code*/ 0,
+                "fn main() { let value = 1; }".to_string(),
+            )),
             source: ExecCommandSource::Agent,
             start_time: None,
             duration: None,
@@ -1275,11 +1239,10 @@ mod tests {
                 query: Some("fn main".into()),
                 path: Some("src".into()),
             }],
-            output: Some(CommandOutput {
-                exit_code: 0,
-                aggregated_output: r"C:\src\main.rs:12:fn main() {".to_string(),
-                formatted_output: r"C:\src\main.rs:12:fn main() {".to_string(),
-            }),
+            output: Some(CommandOutput::new(
+                /*exit_code*/ 0,
+                r"C:\src\main.rs:12:fn main() {".to_string(),
+            )),
             source: ExecCommandSource::Agent,
             start_time: None,
             duration: None,
