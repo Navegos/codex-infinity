@@ -190,6 +190,7 @@ async fn shell_command_handler_can_disable_timeouts_from_config() {
                 .environment,
         ),
         PathUri::from_abs_path(&cwd),
+        Vec::new(),
         None,
     );
     let exec_params = ShellCommandHandler::to_exec_params(
