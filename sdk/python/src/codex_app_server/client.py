@@ -6,7 +6,6 @@ import threading
 import uuid
 from _thread import LockType
 from collections import deque
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, TypeVar
@@ -18,15 +17,9 @@ from .generated.notification_registry import NOTIFICATION_MODELS
 from .generated.v2_all import (
     AccountLoginCompletedNotification,
     AgentMessageDeltaNotification,
-    CancelLoginAccountResponse,
-    ChatgptDeviceCodeLoginAccountResponse,
-    ChatgptLoginAccountResponse,
     GetAccountParams as V2GetAccountParams,
-    GetAccountResponse,
     IdleThreadStatus,
     LoginAccountParams as V2LoginAccountParams,
-    LoginAccountResponse,
-    LogoutAccountResponse,
     ModelListResponse,
     ThreadArchiveResponse,
     ThreadCompactStartResponse,
@@ -103,7 +96,9 @@ def _params_dict(
         return dumped
     if isinstance(params, dict):
         return params
-    raise TypeError(f"Expected generated params model or dict, got {type(params).__name__}")
+    raise TypeError(
+        f"Expected generated params model or dict, got {type(params).__name__}"
+    )
 
 
 def _installed_codex_path() -> Path:
@@ -143,7 +138,9 @@ def _prepend_path_dirs(env: dict[str, str], path_dirs: tuple[Path, ...]) -> None
     existing_path = env.get(path_key, "")
     path_dir_values = [str(path_dir) for path_dir in path_dirs]
     existing_entries = [
-        entry for entry in existing_path.split(path_sep) if entry and entry not in path_dir_values
+        entry
+        for entry in existing_path.split(path_sep)
+        if entry and entry not in path_dir_values
     ]
     env[path_key] = path_sep.join([*path_dir_values, *existing_entries])
 
@@ -317,7 +314,9 @@ class CodexClient:
 
     def _request_raw(self, method: str, params: JsonObject | None = None) -> JsonValue:
         request_id = str(uuid.uuid4())
-        self._write_message({"id": request_id, "method": method, "params": params or {}})
+        self._write_message(
+            {"id": request_id, "method": method, "params": params or {}}
+        )
 
         while True:
             msg = self._read_message()
@@ -379,8 +378,12 @@ class CodexClient:
             if self._active_turn_consumer == turn_id:
                 self._active_turn_consumer = None
 
-    def thread_start(self, params: V2ThreadStartParams | JsonObject | None = None) -> ThreadStartResponse:
-        return self.request("thread/start", _params_dict(params), response_model=ThreadStartResponse)
+    def thread_start(
+        self, params: V2ThreadStartParams | JsonObject | None = None
+    ) -> ThreadStartResponse:
+        return self.request(
+            "thread/start", _params_dict(params), response_model=ThreadStartResponse
+        )
 
     def thread_resume(
         self,
@@ -388,12 +391,20 @@ class CodexClient:
         params: V2ThreadResumeParams | JsonObject | None = None,
     ) -> ThreadResumeResponse:
         payload = {"threadId": thread_id, **_params_dict(params)}
-        return self.request("thread/resume", payload, response_model=ThreadResumeResponse)
+        return self.request(
+            "thread/resume", payload, response_model=ThreadResumeResponse
+        )
 
-    def thread_list(self, params: V2ThreadListParams | JsonObject | None = None) -> ThreadListResponse:
-        return self.request("thread/list", _params_dict(params), response_model=ThreadListResponse)
+    def thread_list(
+        self, params: V2ThreadListParams | JsonObject | None = None
+    ) -> ThreadListResponse:
+        return self.request(
+            "thread/list", _params_dict(params), response_model=ThreadListResponse
+        )
 
-    def thread_read(self, thread_id: str, include_turns: bool = False) -> ThreadReadResponse:
+    def thread_read(
+        self, thread_id: str, include_turns: bool = False
+    ) -> ThreadReadResponse:
         return self.request(
             "thread/read",
             {"threadId": thread_id, "includeTurns": include_turns},
@@ -409,10 +420,18 @@ class CodexClient:
         return self.request("thread/fork", payload, response_model=ThreadForkResponse)
 
     def thread_archive(self, thread_id: str) -> ThreadArchiveResponse:
-        return self.request("thread/archive", {"threadId": thread_id}, response_model=ThreadArchiveResponse)
+        return self.request(
+            "thread/archive",
+            {"threadId": thread_id},
+            response_model=ThreadArchiveResponse,
+        )
 
     def thread_unarchive(self, thread_id: str) -> ThreadUnarchiveResponse:
-        return self.request("thread/unarchive", {"threadId": thread_id}, response_model=ThreadUnarchiveResponse)
+        return self.request(
+            "thread/unarchive",
+            {"threadId": thread_id},
+            response_model=ThreadUnarchiveResponse,
+        )
 
     def thread_set_name(self, thread_id: str, name: str) -> ThreadSetNameResponse:
         return self.request(
@@ -627,7 +646,9 @@ class CodexClient:
                 notification = self.next_login_notification(login_id)
                 if (
                     notification.method == "account/login/completed"
-                    and isinstance(notification.payload, AccountLoginCompletedNotification)
+                    and isinstance(
+                        notification.payload, AccountLoginCompletedNotification
+                    )
                     and notification.payload.login_id == login_id
                 ):
                     return notification.payload
@@ -663,12 +684,16 @@ class CodexClient:
 
         model = NOTIFICATION_MODELS.get(method)
         if model is None:
-            return Notification(method=method, payload=UnknownNotification(params=params_dict))
+            return Notification(
+                method=method, payload=UnknownNotification(params=params_dict)
+            )
 
         try:
             payload = model.model_validate(params_dict)
         except Exception:  # noqa: BLE001
-            return Notification(method=method, payload=UnknownNotification(params=params_dict))
+            return Notification(
+                method=method, payload=UnknownNotification(params=params_dict)
+            )
         return Notification(method=method, payload=payload)
 
     def _normalize_input_items(
@@ -681,7 +706,9 @@ class CodexClient:
             return [input_items]
         return input_items
 
-    def _default_approval_handler(self, method: str, params: JsonObject | None) -> JsonObject:
+    def _default_approval_handler(
+        self, method: str, params: JsonObject | None
+    ) -> JsonObject:
         if method == "item/commandExecution/requestApproval":
             return {"decision": "accept"}
         if method == "item/fileChange/requestApproval":

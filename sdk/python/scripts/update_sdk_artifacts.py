@@ -91,7 +91,9 @@ def pinned_runtime_version() -> str:
     pyproject_text = sdk_pyproject_path().read_text()
     match = re.search(r"(?ms)^dependencies = \[(.*?)\]$", pyproject_text)
     if match is None:
-        raise RuntimeError("Could not find dependencies array in sdk/python/pyproject.toml")
+        raise RuntimeError(
+            "Could not find dependencies array in sdk/python/pyproject.toml"
+        )
 
     pins = re.findall(
         rf'"{re.escape(RUNTIME_DISTRIBUTION_NAME)}==([^"]+)"',
@@ -242,13 +244,19 @@ def stage_python_runtime_package(
         pyproject_text = _rewrite_runtime_platform_tag(pyproject_text, platform_tag)
     pyproject_path.write_text(pyproject_text)
 
-    _extract_codex_package_archive(package_archive, staged_runtime_package_root(staging_dir))
+    _extract_codex_package_archive(
+        package_archive, staged_runtime_package_root(staging_dir)
+    )
     return staging_dir
 
 
-def _extract_codex_package_archive(package_archive: Path, runtime_package_root: Path) -> None:
+def _extract_codex_package_archive(
+    package_archive: Path, runtime_package_root: Path
+) -> None:
     if not package_archive.name.endswith(".tar.gz"):
-        raise RuntimeError(f"Expected a .tar.gz Codex package archive: {package_archive}")
+        raise RuntimeError(
+            f"Expected a .tar.gz Codex package archive: {package_archive}"
+        )
 
     runtime_package_root.mkdir(parents=True, exist_ok=True)
     with tarfile.open(package_archive, "r:gz") as archive:
@@ -275,7 +283,9 @@ def _validate_codex_package_layout(package_dir: Path, package_archive: Path) -> 
         missing_entries.append(str(Path("bin") / runtime_code_mode_host_name()))
     if missing_entries:
         missing = ", ".join(missing_entries)
-        raise RuntimeError(f"Missing Codex package layout entries in {package_archive}: {missing}")
+        raise RuntimeError(
+            f"Missing Codex package layout entries in {package_archive}: {missing}"
+        )
 
 
 def _flatten_string_enum_one_of(definition: dict[str, Any]) -> bool:
@@ -338,7 +348,11 @@ def _enum_literals(value: Any) -> list[str] | None:
     if not isinstance(value, dict):
         return None
     enum = value.get("enum")
-    if not isinstance(enum, list) or not enum or not all(isinstance(item, str) for item in enum):
+    if (
+        not isinstance(enum, list)
+        or not enum
+        or not all(isinstance(item, str) for item in enum)
+    ):
         return None
     return list(enum)
 
@@ -376,7 +390,11 @@ def _variant_definition_name(base: str, variant: dict[str, Any]) -> str | None:
             return f"{_to_pascal_case(pascal or key)}{base}"
 
     required = variant.get("required")
-    if isinstance(required, list) and len(required) == 1 and isinstance(required[0], str):
+    if (
+        isinstance(required, list)
+        and len(required) == 1
+        and isinstance(required[0], str)
+    ):
         return f"{_to_pascal_case(required[0])}{base}"
 
     enum_literals = _enum_literals(variant)
@@ -388,7 +406,9 @@ def _variant_definition_name(base: str, variant: dict[str, Any]) -> str | None:
     return None
 
 
-def _variant_collision_key(base: str, variant: dict[str, Any], generated_name: str) -> str:
+def _variant_collision_key(
+    base: str, variant: dict[str, Any], generated_name: str
+) -> str:
     parts = [f"base={base}", f"generated={generated_name}"]
     props = variant.get("properties")
     if isinstance(props, dict):
@@ -400,7 +420,11 @@ def _variant_collision_key(base: str, variant: dict[str, Any], generated_name: s
             parts.append(f"only_property={next(iter(props))}")
 
     required = variant.get("required")
-    if isinstance(required, list) and len(required) == 1 and isinstance(required[0], str):
+    if (
+        isinstance(required, list)
+        and len(required) == 1
+        and isinstance(required[0], str)
+    ):
         parts.append(f"required_only={required[0]}")
 
     enum_literals = _enum_literals(variant)
@@ -516,7 +540,9 @@ def _make_chatgpt_account_email_nullable(schema: dict[str, Any]) -> None:
         if not isinstance(properties, dict):
             continue
         account_type = properties.get("type")
-        if not isinstance(account_type, dict) or account_type.get("enum") != ["chatgpt"]:
+        if not isinstance(account_type, dict) or account_type.get("enum") != [
+            "chatgpt"
+        ]:
             continue
         email = properties.get("email")
         if not isinstance(email, dict):
@@ -697,9 +723,13 @@ def _preserve_thread_source_enum(out_path: Path) -> None:
 
 def _notification_specs(schema_dir: Path) -> list[tuple[str, str]]:
     """Map each server notification method to its generated payload model class."""
-    server_notifications = json.loads((schema_dir / "ServerNotification.json").read_text())
+    server_notifications = json.loads(
+        (schema_dir / "ServerNotification.json").read_text()
+    )
     one_of = server_notifications.get("oneOf", [])
-    generated_source = (sdk_root() / "src" / "openai_codex" / "generated" / "v2_all.py").read_text()
+    generated_source = (
+        sdk_root() / "src" / "openai_codex" / "generated" / "v2_all.py"
+    ).read_text()
 
     specs: list[tuple[str, str]] = []
 
@@ -736,7 +766,9 @@ def _notification_turn_id_specs(
     specs: list[tuple[str, str]],
 ) -> tuple[list[str], list[str]]:
     """Classify notification payloads by where their turn id is carried."""
-    server_notifications = json.loads((schema_dir / "ServerNotification.json").read_text())
+    server_notifications = json.loads(
+        (schema_dir / "ServerNotification.json").read_text()
+    )
     definitions = server_notifications.get("definitions", {})
     if not isinstance(definitions, dict):
         return ([], [])
@@ -955,7 +987,9 @@ def _approval_mode_override_signature_lines() -> list[str]:
     return ["        approval_mode: ApprovalMode | None = None,"]
 
 
-def _approval_mode_assignment_line(helper_name: str, *, indent: str = "        ") -> str:
+def _approval_mode_assignment_line(
+    helper_name: str, *, indent: str = "        "
+) -> str:
     """Return the local mapping from public mode to app-server params."""
     return f"{indent}approval_policy, approvals_reviewer = {helper_name}(approval_mode)"
 
@@ -968,7 +1002,9 @@ def _approval_mode_model_arg_lines(*, indent: str = "            ") -> list[str]
     ]
 
 
-def _model_arg_lines(fields: list[PublicFieldSpec], *, indent: str = "            ") -> list[str]:
+def _model_arg_lines(
+    fields: list[PublicFieldSpec], *, indent: str = "            "
+) -> list[str]:
     lines: list[str] = []
     for field in fields:
         arg = field.py_name
@@ -991,7 +1027,9 @@ def _replace_public_sandbox_field(
             public_fields.append(field)
             continue
         if replaced:
-            raise RuntimeError(f"Found more than one generated sandbox field named {wire_name}")
+            raise RuntimeError(
+                f"Found more than one generated sandbox field named {wire_name}"
+            )
         public_fields.append(
             PublicFieldSpec(
                 wire_name=wire_name,
@@ -1255,7 +1293,9 @@ def generate_public_api_flat_methods() -> None:
         "ThreadStartParams",
         exclude=approval_fields,
     )
-    thread_start_fields = _replace_public_sandbox_field(thread_start_fields, wire_name="sandbox")
+    thread_start_fields = _replace_public_sandbox_field(
+        thread_start_fields, wire_name="sandbox"
+    )
     thread_list_fields = _load_public_fields(
         "openai_codex.generated.v2_all",
         "ThreadListParams",
@@ -1265,13 +1305,17 @@ def generate_public_api_flat_methods() -> None:
         "ThreadResumeParams",
         exclude={"thread_id", *approval_fields},
     )
-    thread_resume_fields = _replace_public_sandbox_field(thread_resume_fields, wire_name="sandbox")
+    thread_resume_fields = _replace_public_sandbox_field(
+        thread_resume_fields, wire_name="sandbox"
+    )
     thread_fork_fields = _load_public_fields(
         "openai_codex.generated.v2_all",
         "ThreadForkParams",
         exclude={"thread_id", "last_turn_id", *approval_fields},
     )
-    thread_fork_fields = _replace_public_sandbox_field(thread_fork_fields, wire_name="sandbox")
+    thread_fork_fields = _replace_public_sandbox_field(
+        thread_fork_fields, wire_name="sandbox"
+    )
     turn_start_fields = _load_public_fields(
         "openai_codex.generated.v2_all",
         "TurnStartParams",
@@ -1279,7 +1323,9 @@ def generate_public_api_flat_methods() -> None:
         # through the ergonomic Python API yet.
         exclude={"thread_id", "input", "client_user_message_id", *approval_fields},
     )
-    turn_start_fields = _replace_public_sandbox_field(turn_start_fields, wire_name="sandbox_policy")
+    turn_start_fields = _replace_public_sandbox_field(
+        turn_start_fields, wire_name="sandbox_policy"
+    )
 
     source = public_api_path.read_text()
     source = _replace_generated_block(
@@ -1335,7 +1381,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Single SDK maintenance entrypoint")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("generate-types", help="Regenerate Python protocol-derived types")
+    subparsers.add_parser(
+        "generate-types", help="Regenerate Python protocol-derived types"
+    )
 
     stage_sdk_parser = subparsers.add_parser(
         "stage-sdk",

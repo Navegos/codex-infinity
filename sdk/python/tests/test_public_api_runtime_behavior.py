@@ -240,7 +240,9 @@ def test_turn_stream_rejects_second_active_consumer() -> None:
     assert next(first_stream).method == "item/agentMessage/delta"
 
     second_stream = TurnHandle(client, "thread-1", "turn-2").stream()
-    with pytest.raises(RuntimeError, match="Concurrent turn consumers are not yet supported"):
+    with pytest.raises(
+        RuntimeError, match="Concurrent turn consumers are not yet supported"
+    ):
         next(second_stream)
 
     first_stream.close()
@@ -270,7 +272,9 @@ def test_async_turn_stream_rejects_second_active_consumer() -> None:
         assert (await anext(first_stream)).method == "item/agentMessage/delta"
 
         second_stream = AsyncTurnHandle(codex, "thread-1", "turn-2").stream()
-        with pytest.raises(RuntimeError, match="Concurrent turn consumers are not yet supported"):
+        with pytest.raises(
+            RuntimeError, match="Concurrent turn consumers are not yet supported"
+        ):
             await anext(second_stream)
 
         await first_stream.aclose()
@@ -491,15 +495,21 @@ def test_async_thread_run_accepts_string_input_and_returns_run_result() -> None:
     asyncio.run(scenario())
 
 
-def test_async_thread_run_uses_last_completed_assistant_message_as_final_response() -> None:
+def test_async_thread_run_uses_last_completed_assistant_message_as_final_response() -> (
+    None
+):
     async def scenario() -> None:
         codex = AsyncCodex()
 
         async def fake_ensure_initialized() -> None:
             return None
 
-        first_item_notification = _item_completed_notification(text="First async message")
-        second_item_notification = _item_completed_notification(text="Second async message")
+        first_item_notification = _item_completed_notification(
+            text="First async message"
+        )
+        second_item_notification = _item_completed_notification(
+            text="Second async message"
+        )
         notifications: deque[Notification] = deque(
             [
                 first_item_notification,
@@ -568,7 +578,8 @@ def test_async_thread_run_returns_none_when_only_commentary_messages_complete() 
 def test_sandbox_presets_serialize_for_threads_and_turns() -> None:
     """One public sandbox enum should map to both stable wire representations."""
     assert {
-        sandbox.name: public_api_module._sandbox_mode(sandbox).value for sandbox in Sandbox
+        sandbox.name: public_api_module._sandbox_mode(sandbox).value
+        for sandbox in Sandbox
     } == {
         "read_only": "read-only",
         "workspace_write": "workspace-write",

@@ -12,7 +12,9 @@ def test_data_url_image_input_reaches_responses_api(
     tmp_path,
 ) -> None:
     """Data URL image inputs should survive the SDK and app-server boundary."""
-    image_data_url = "data:image/png;base64," + base64.b64encode(TINY_PNG_BYTES).decode("ascii")
+    image_data_url = "data:image/png;base64," + base64.b64encode(TINY_PNG_BYTES).decode(
+        "ascii"
+    )
 
     with AppServerHarness(tmp_path) as harness:
         harness.responses.enqueue_assistant_message(
@@ -67,7 +69,8 @@ def test_local_image_input_reaches_responses_api(
 
     assert {
         "final_response": result.final_response,
-        "contains_user_prompt": "Describe the local image." in request.message_input_texts("user"),
+        "contains_user_prompt": "Describe the local image."
+        in request.message_input_texts("user"),
         "image_url_is_png_data_url": request.message_image_urls("user")[-1].startswith(
             "data:image/png;base64,"
         ),
@@ -85,7 +88,9 @@ def test_skill_input_injects_loaded_skill_body(tmp_path) -> None:
     with AppServerHarness(tmp_path) as harness:
         skill_file = harness.workspace / ".agents" / "skills" / "demo" / "SKILL.md"
         skill_file.parent.mkdir(parents=True)
-        skill_file.write_text(f"---\nname: demo\ndescription: demo skill\n---\n\n{skill_body}\n")
+        skill_file.write_text(
+            f"---\nname: demo\ndescription: demo skill\n---\n\n{skill_body}\n"
+        )
         skill_path = skill_file.resolve()
         harness.responses.enqueue_assistant_message(
             "skill received",
@@ -102,7 +107,9 @@ def test_skill_input_injects_loaded_skill_body(tmp_path) -> None:
             request = harness.responses.single_request()
 
     skill_blocks = [
-        text for text in request.message_input_texts("user") if text.startswith("<skill>")
+        text
+        for text in request.message_input_texts("user")
+        if text.startswith("<skill>")
     ]
     assert {
         "final_response": result.final_response,

@@ -3,12 +3,11 @@ from __future__ import annotations
 import base64
 import contextlib
 import importlib.util
-import os
 import sys
 import tempfile
 import zlib
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Iterator
 
 _SDK_PYTHON_DIR = Path(__file__).resolve().parents[1]
 _SDK_PYTHON_STR = str(_SDK_PYTHON_DIR)
@@ -50,7 +49,6 @@ def ensure_local_sdk_src() -> Path:
 
 def runtime_config():
     """Return an example-friendly AppServerConfig for repo-source SDK usage."""
-    from codex_app_server import AppServerConfig
 
     ensure_runtime_package_installed(sys.executable, _SDK_PYTHON_DIR)
     return CodexConfig()
@@ -112,12 +110,18 @@ def temporary_sample_image_path() -> Iterator[Path]:
 
 def server_label(metadata: object) -> str:
     server = getattr(metadata, "serverInfo", None)
-    server_name = ((getattr(server, "name", None) or "") if server is not None else "").strip()
-    server_version = ((getattr(server, "version", None) or "") if server is not None else "").strip()
+    server_name = (
+        (getattr(server, "name", None) or "") if server is not None else ""
+    ).strip()
+    server_version = (
+        (getattr(server, "version", None) or "") if server is not None else ""
+    ).strip()
     if server_name and server_version:
         return f"{server_name} {server_version}"
 
-    user_agent = ((getattr(metadata, "userAgent", None) or "") if metadata is not None else "").strip()
+    user_agent = (
+        (getattr(metadata, "userAgent", None) or "") if metadata is not None else ""
+    ).strip()
     return user_agent or "unknown"
 
 

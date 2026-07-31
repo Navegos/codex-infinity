@@ -167,7 +167,9 @@ def main() -> int:
             workflow_url, resolved_head_sha = resolve_workflow_url(
                 args.release_version, args.workflow_url
             )
-            vendor_temp_root = Path(tempfile.mkdtemp(prefix="npm-native-", dir=runner_temp))
+            vendor_temp_root = Path(
+                tempfile.mkdtemp(prefix="npm-native-", dir=runner_temp)
+            )
             install_native_components(workflow_url, native_components, vendor_temp_root)
             vendor_src = vendor_temp_root / "vendor"
 
@@ -175,8 +177,12 @@ def main() -> int:
             print(f"should `git checkout {resolved_head_sha}`")
 
         for package in packages:
-            staging_dir = Path(tempfile.mkdtemp(prefix=f"npm-stage-{package}-", dir=runner_temp))
-            pack_output = output_dir / tarball_name_for_package(package, args.release_version)
+            staging_dir = Path(
+                tempfile.mkdtemp(prefix=f"npm-stage-{package}-", dir=runner_temp)
+            )
+            pack_output = output_dir / tarball_name_for_package(
+                package, args.release_version
+            )
 
             cmd = [
                 str(BUILD_SCRIPT),

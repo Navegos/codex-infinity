@@ -72,13 +72,22 @@ def _collect_turn_result(stream: Iterator[Notification], *, turn_id: str) -> Tur
 
     for event in stream:
         payload = event.payload
-        if isinstance(payload, ItemCompletedNotification) and payload.turn_id == turn_id:
+        if (
+            isinstance(payload, ItemCompletedNotification)
+            and payload.turn_id == turn_id
+        ):
             items.append(payload.item)
             continue
-        if isinstance(payload, ThreadTokenUsageUpdatedNotification) and payload.turn_id == turn_id:
+        if (
+            isinstance(payload, ThreadTokenUsageUpdatedNotification)
+            and payload.turn_id == turn_id
+        ):
             usage = payload.token_usage
             continue
-        if isinstance(payload, TurnCompletedNotification) and payload.turn.id == turn_id:
+        if (
+            isinstance(payload, TurnCompletedNotification)
+            and payload.turn.id == turn_id
+        ):
             completed = payload
 
     if completed is None:
@@ -108,13 +117,22 @@ async def _collect_async_turn_result(
 
     async for event in stream:
         payload = event.payload
-        if isinstance(payload, ItemCompletedNotification) and payload.turn_id == turn_id:
+        if (
+            isinstance(payload, ItemCompletedNotification)
+            and payload.turn_id == turn_id
+        ):
             items.append(payload.item)
             continue
-        if isinstance(payload, ThreadTokenUsageUpdatedNotification) and payload.turn_id == turn_id:
+        if (
+            isinstance(payload, ThreadTokenUsageUpdatedNotification)
+            and payload.turn_id == turn_id
+        ):
             usage = payload.token_usage
             continue
-        if isinstance(payload, TurnCompletedNotification) and payload.turn.id == turn_id:
+        if (
+            isinstance(payload, TurnCompletedNotification)
+            and payload.turn.id == turn_id
+        ):
             completed = payload
 
     if completed is None:

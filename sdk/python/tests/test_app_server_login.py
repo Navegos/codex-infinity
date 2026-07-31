@@ -22,7 +22,9 @@ def _app_server_config(harness: AppServerHarness) -> CodexConfig:
 def test_api_key_login_authenticates_follow_up_model_requests(tmp_path) -> None:
     """API-key login should authorize the next Responses request with that key."""
     with AppServerHarness(tmp_path, requires_openai_auth=True) as harness:
-        harness.responses.enqueue_assistant_message("api key auth", response_id="api-key-auth")
+        harness.responses.enqueue_assistant_message(
+            "api key auth", response_id="api-key-auth"
+        )
 
         with Codex(config=_app_server_config(harness)) as codex:
             codex.login_api_key("sk-sdk-login-test")

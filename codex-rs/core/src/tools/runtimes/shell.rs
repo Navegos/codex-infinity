@@ -11,7 +11,6 @@ pub(crate) mod zsh_fork_backend;
 use crate::command_canonicalization::canonicalize_command_for_approval;
 use crate::exec::ExecCapturePolicy;
 use crate::exec::ExecExpiration;
-use crate::guardian::GuardianApprovalRequest;
 use crate::guardian::GuardianNetworkAccessTrigger;
 use crate::sandboxing::ExecOptions;
 use crate::sandboxing::SandboxPermissions;

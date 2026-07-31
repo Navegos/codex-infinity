@@ -29,7 +29,8 @@ def _snapshot_target(root: Path, rel_path: Path) -> dict[str, bytes] | bytes | N
 
 def _snapshot_targets(root: Path) -> dict[str, dict[str, bytes] | bytes | None]:
     return {
-        str(rel_path): _snapshot_target(root, rel_path) for rel_path in GENERATED_TARGETS
+        str(rel_path): _snapshot_target(root, rel_path)
+        for rel_path in GENERATED_TARGETS
     }
 
 

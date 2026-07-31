@@ -5,7 +5,7 @@ _EXAMPLES_ROOT = Path(__file__).resolve().parents[1]
 if str(_EXAMPLES_ROOT) not in sys.path:
     sys.path.insert(0, str(_EXAMPLES_ROOT))
 
-from _bootstrap import assistant_text_from_turn, ensure_local_sdk_src, find_turn_by_id, runtime_config
+from _bootstrap import assistant_text_from_turn, ensure_local_sdk_src, runtime_config
 
 ensure_local_sdk_src()
 
@@ -33,11 +33,16 @@ REASONING_RANK = {
 
 def _pick_highest_model(models):
     visible = [m for m in models if not m.hidden] or models
-    preferred = next((m for m in visible if m.model == PREFERRED_MODEL or m.id == PREFERRED_MODEL), None)
+    preferred = next(
+        (m for m in visible if m.model == PREFERRED_MODEL or m.id == PREFERRED_MODEL),
+        None,
+    )
     if preferred is not None:
         return preferred
     known_names = {m.id for m in visible} | {m.model for m in visible}
-    top_candidates = [m for m in visible if not (m.upgrade and m.upgrade in known_names)]
+    top_candidates = [
+        m for m in visible if not (m.upgrade and m.upgrade in known_names)
+    ]
     if not top_candidates:
         raise RuntimeError("models response did not include top-level visible models")
     return max(top_candidates, key=lambda m: (m.model, m.id))
@@ -45,7 +50,9 @@ def _pick_highest_model(models):
 
 def _pick_highest_turn_effort(model) -> ReasoningEffort:
     if not model.supported_reasoning_efforts:
-        raise RuntimeError(f"{model.model} did not advertise supported reasoning efforts")
+        raise RuntimeError(
+            f"{model.model} did not advertise supported reasoning efforts"
+        )
 
     best = max(
         model.supported_reasoning_efforts,
@@ -98,7 +105,12 @@ async def main() -> None:
         first = await first_turn.run()
 
         print("agent.message:", assistant_text_from_turn(first_persisted_turn))
-        print("items:", 0 if first_persisted_turn is None else len(first_persisted_turn.items or []))
+        print(
+            "items:",
+            0
+            if first_persisted_turn is None
+            else len(first_persisted_turn.items or []),
+        )
 
         second_turn = await thread.turn(
             TextInput("Return JSON for a safe feature-flag rollout plan."),
@@ -114,7 +126,12 @@ async def main() -> None:
         second = await second_turn.run()
 
         print("agent.message.params:", assistant_text_from_turn(second_persisted_turn))
-        print("items.params:", 0 if second_persisted_turn is None else len(second_persisted_turn.items or []))
+        print(
+            "items.params:",
+            0
+            if second_persisted_turn is None
+            else len(second_persisted_turn.items or []),
+        )
 
 
 if __name__ == "__main__":

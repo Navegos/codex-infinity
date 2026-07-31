@@ -13,13 +13,14 @@ from codex_app_server import (
     Codex,
     JsonRpcError,
     ServerBusyError,
-    TextInput,
     TurnStatus,
     retry_on_overload,
 )
 
 with Codex(config=runtime_config()) as codex:
-    thread = codex.thread_start(model="gpt-5.4", config={"model_reasoning_effort": "high"})
+    thread = codex.thread_start(
+        model="gpt-5.4", config={"model_reasoning_effort": "high"}
+    )
 
     try:
         result = retry_on_overload(

@@ -5,7 +5,11 @@ _EXAMPLES_ROOT = Path(__file__).resolve().parents[1]
 if str(_EXAMPLES_ROOT) not in sys.path:
     sys.path.insert(0, str(_EXAMPLES_ROOT))
 
-from _bootstrap import ensure_local_sdk_src, generated_sample_image_data_url, runtime_config
+from _bootstrap import (
+    ensure_local_sdk_src,
+    generated_sample_image_data_url,
+    runtime_config,
+)
 
 ensure_local_sdk_src()
 
@@ -18,7 +22,9 @@ IMAGE_DATA_URL = generated_sample_image_data_url()
 
 async def main() -> None:
     async with AsyncCodex(config=runtime_config()) as codex:
-        thread = await codex.thread_start(model="gpt-5.4", config={"model_reasoning_effort": "high"})
+        thread = await codex.thread_start(
+            model="gpt-5.4", config={"model_reasoning_effort": "high"}
+        )
         turn = await thread.turn(
             [
                 TextInput("What is in this image? Give 3 bullets."),

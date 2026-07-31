@@ -9,10 +9,12 @@ from _bootstrap import ensure_local_sdk_src, runtime_config
 
 ensure_local_sdk_src()
 
-from codex_app_server import Codex, TextInput
+from codex_app_server import Codex
 
 with Codex(config=runtime_config()) as codex:
-    thread = codex.thread_start(model="gpt-5.4", config={"model_reasoning_effort": "high"})
+    thread = codex.thread_start(
+        model="gpt-5.4", config={"model_reasoning_effort": "high"}
+    )
     turn = thread.turn("Explain SIMD in 3 short bullets.")
 
     event_count = 0
@@ -41,7 +43,9 @@ with Codex(config=runtime_config()) as codex:
                 completed_texts.append(root.text)
             continue
         if event.method == "turn/completed":
-            completed_status = getattr(event.payload.turn.status, "value", str(event.payload.turn.status))
+            completed_status = getattr(
+                event.payload.turn.status, "value", str(event.payload.turn.status)
+            )
 
     if completed_status is None:
         raise RuntimeError("stream ended without turn/completed")

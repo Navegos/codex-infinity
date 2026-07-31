@@ -45,7 +45,9 @@ def _load_runtime_setup_module():
     runtime_setup_path = ROOT / "_runtime_setup.py"
     spec = importlib.util.spec_from_file_location("_runtime_setup", runtime_setup_path)
     if spec is None or spec.loader is None:
-        raise AssertionError(f"Failed to load runtime setup module: {runtime_setup_path}")
+        raise AssertionError(
+            f"Failed to load runtime setup module: {runtime_setup_path}"
+        )
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -70,7 +72,9 @@ def _write_fake_codex_package(package_dir: Path, script) -> Path:
     (package_dir / "codex-path").mkdir()
     (package_dir / "codex-package.json").write_text('{"variant":"codex"}\n')
     (package_dir / "bin" / script.runtime_binary_name()).write_text("fake codex\n")
-    (package_dir / "bin" / script.runtime_code_mode_host_name()).write_text("fake code mode host\n")
+    (package_dir / "bin" / script.runtime_code_mode_host_name()).write_text(
+        "fake code mode host\n"
+    )
     (package_dir / "codex-resources" / "bwrap").write_text("fake bwrap\n")
     (package_dir / "codex-path" / "rg").write_text("fake rg\n")
     return package_dir
@@ -108,7 +112,9 @@ def test_root_fmt_recipes_use_shared_formatter_driver() -> None:
     )
     actual = {
         "working_directory": lines[0],
-        "fmt_comment": next(line for line in reversed(lines[:fmt_index]) if line.startswith("#")),
+        "fmt_comment": next(
+            line for line in reversed(lines[:fmt_index]) if line.startswith("#")
+        ),
         "fmt_commands": [
             line.strip()
             for line in lines[fmt_index + 1 : fmt_check_index]
@@ -118,7 +124,9 @@ def test_root_fmt_recipes_use_shared_formatter_driver() -> None:
             line for line in reversed(lines[:fmt_check_index]) if line.startswith("#")
         ),
         "fmt_check_commands": [
-            line.strip() for line in lines[fmt_check_index + 1 : next_recipe_index] if line.strip()
+            line.strip()
+            for line in lines[fmt_check_index + 1 : next_recipe_index]
+            if line.strip()
         ],
     }
     expected = {
@@ -269,7 +277,9 @@ def test_root_format_driver_discards_successful_command_output(
             script.subprocess.CompletedProcess(("second",), 2, "failure output\n"),
         )
     )
-    monkeypatch.setattr(script.subprocess, "run", lambda *args, **kwargs: next(processes))
+    monkeypatch.setattr(
+        script.subprocess, "run", lambda *args, **kwargs: next(processes)
+    )
     group = script.FormatterGroup(
         "Test",
         (script.Command(("first",)), script.Command(("second",))),
@@ -337,7 +347,8 @@ def test_generate_types_wires_all_generation_steps() -> None:
         (
             node
             for node in tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == "generate_types_from_schema_dir"
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "generate_types_from_schema_dir"
         ),
         None,
     )
@@ -374,7 +385,8 @@ def test_schema_normalization_only_flattens_string_literal_oneofs(
     flattened = [
         name
         for name, definition in definitions.items()
-        if isinstance(definition, dict) and script._flatten_string_enum_one_of(definition.copy())
+        if isinstance(definition, dict)
+        and script._flatten_string_enum_one_of(definition.copy())
     ]
 
     assert flattened == [
@@ -464,7 +476,9 @@ def test_generate_v2_all_uses_titles_for_generated_names() -> None:
 def test_generated_chatgpt_account_email_is_required_nullable() -> None:
     from openai_codex.generated.v2_all import ChatgptAccount
 
-    account = ChatgptAccount.model_validate({"email": None, "planType": "pro", "type": "chatgpt"})
+    account = ChatgptAccount.model_validate(
+        {"email": None, "planType": "pro", "type": "chatgpt"}
+    )
     assert account.email is None
     assert ChatgptAccount.model_fields["email"].is_required()
 
@@ -530,7 +544,7 @@ def test_source_sdk_package_declares_stable_documentation() -> None:
 
     assert {
         "description": pyproject["project"]["description"],
-        "is_stable": "Development Status :: 5 - Production/Stable"
+        "is_beta": "Development Status :: 4 - Beta"
         in pyproject["project"]["classifiers"],
         "license": pyproject["project"]["license"],
         "documentation": pyproject["project"]["urls"]["Documentation"],
@@ -538,7 +552,7 @@ def test_source_sdk_package_declares_stable_documentation() -> None:
         "local_license_file": (ROOT / "LICENSE").exists(),
     } == {
         "description": "Python SDK for Codex",
-        "is_stable": True,
+        "is_beta": True,
         "license": "Apache-2.0",
         "documentation": "https://github.com/openai/codex/tree/main/sdk/python/docs",
         "readme_is_stable": True,
@@ -622,7 +636,9 @@ def test_runtime_setup_downloads_codex_package_archives(
 
 
 def test_runtime_package_is_wheel_only_and_builds_platform_specific_wheels() -> None:
-    pyproject = tomllib.loads((ROOT.parent / "python-runtime" / "pyproject.toml").read_text())
+    pyproject = tomllib.loads(
+        (ROOT.parent / "python-runtime" / "pyproject.toml").read_text()
+    )
     hook_source = (ROOT.parent / "python-runtime" / "hatch_build.py").read_text()
     hook_tree = ast.parse(hook_source)
     initialize_fn = next(
@@ -704,7 +720,9 @@ def test_stage_runtime_release_copies_package_layout_and_sets_version(
     assert {
         "metadata": (package_root / "codex-package.json").read_text(),
         "codex": (package_root / "bin" / script.runtime_binary_name()).read_text(),
-        "code_mode_host": (package_root / "bin" / script.runtime_code_mode_host_name()).read_text(),
+        "code_mode_host": (
+            package_root / "bin" / script.runtime_code_mode_host_name()
+        ).read_text(),
         "bwrap": (package_root / "codex-resources" / "bwrap").read_text(),
         "rg": (package_root / "codex-path" / "rg").read_text(),
     } == {
@@ -787,7 +805,9 @@ def test_stage_runtime_release_replaces_existing_staging_dir(tmp_path: Path) -> 
     assert staged == staging_dir
     assert not old_file.exists()
     package_root = script.staged_runtime_package_root(staged)
-    assert (package_root / "bin" / script.runtime_binary_name()).read_text() == "fake codex\n"
+    assert (
+        package_root / "bin" / script.runtime_binary_name()
+    ).read_text() == "fake codex\n"
 
 
 def test_stage_runtime_release_can_pin_wheel_platform_tag(tmp_path: Path) -> None:
@@ -805,7 +825,9 @@ def test_stage_runtime_release_can_pin_wheel_platform_tag(tmp_path: Path) -> Non
     assert 'platform-tag = "manylinux_2_17_x86_64"' in pyproject
 
 
-def test_stage_runtime_release_rejects_incomplete_package_layout(tmp_path: Path) -> None:
+def test_stage_runtime_release_rejects_incomplete_package_layout(
+    tmp_path: Path,
+) -> None:
     script = _load_update_script_module()
     package_dir = tmp_path / "codex-package"
     (package_dir / "bin").mkdir(parents=True)
@@ -813,7 +835,9 @@ def test_stage_runtime_release_rejects_incomplete_package_layout(tmp_path: Path)
     _write_package_archive(package_dir, package_archive)
 
     with pytest.raises(RuntimeError, match="Missing Codex package layout entries"):
-        script.stage_python_runtime_package(tmp_path / "runtime-stage", "1.2.3", package_archive)
+        script.stage_python_runtime_package(
+            tmp_path / "runtime-stage", "1.2.3", package_archive
+        )
 
 
 def test_runtime_package_layout_is_included_by_wheel_config(
@@ -982,7 +1006,9 @@ def test_stage_runtime_stages_package_without_type_generation(tmp_path: Path) ->
         package_archive: Path,
         platform_tag: str | None,
     ) -> Path:
-        calls.append(f"stage_runtime:{codex_version}:{platform_tag}:{package_archive.name}")
+        calls.append(
+            f"stage_runtime:{codex_version}:{platform_tag}:{package_archive.name}"
+        )
         return tmp_path / "runtime-stage"
 
     def fake_current_sdk_version() -> str:
@@ -997,7 +1023,9 @@ def test_stage_runtime_stages_package_without_type_generation(tmp_path: Path) ->
 
     script.run_command(args, ops)
 
-    assert calls == ["stage_runtime:0.116.0a1:manylinux_2_17_x86_64:codex-package.tar.gz"]
+    assert calls == [
+        "stage_runtime:0.116.0a1:manylinux_2_17_x86_64:codex-package.tar.gz"
+    ]
 
 
 def test_default_runtime_is_resolved_from_installed_runtime_package(

@@ -12,8 +12,12 @@ ensure_local_sdk_src()
 from codex_app_server import Codex, TextInput
 
 with Codex(config=runtime_config()) as codex:
-    thread = codex.thread_start(model="gpt-5.4", config={"model_reasoning_effort": "high"})
-    steer_turn = thread.turn(TextInput("Count from 1 to 40 with commas, then one summary sentence."))
+    thread = codex.thread_start(
+        model="gpt-5.4", config={"model_reasoning_effort": "high"}
+    )
+    steer_turn = thread.turn(
+        TextInput("Count from 1 to 40 with commas, then one summary sentence.")
+    )
     steer_result = "sent"
     try:
         _ = steer_turn.steer(TextInput("Keep it brief and stop after 10 numbers."))
@@ -30,13 +34,17 @@ with Codex(config=runtime_config()) as codex:
             continue
         if event.method == "turn/completed":
             steer_completed_turn = event.payload.turn
-            steer_completed_status = getattr(event.payload.turn.status, "value", str(event.payload.turn.status))
+            steer_completed_status = getattr(
+                event.payload.turn.status, "value", str(event.payload.turn.status)
+            )
 
     if steer_completed_status is None:
         raise RuntimeError("stream ended without turn/completed")
     steer_preview = "".join(steer_deltas).strip()
 
-    interrupt_turn = thread.turn(TextInput("Count from 1 to 200 with commas, then one summary sentence."))
+    interrupt_turn = thread.turn(
+        TextInput("Count from 1 to 200 with commas, then one summary sentence.")
+    )
     interrupt_result = "sent"
     try:
         _ = interrupt_turn.interrupt()
@@ -53,9 +61,14 @@ with Codex(config=runtime_config()) as codex:
             continue
         if event.method == "turn/completed":
             interrupt_completed_turn = event.payload.turn
-            interrupt_completed_status = getattr(event.payload.turn.status, "value", str(event.payload.turn.status))
+            interrupt_completed_status = getattr(
+                event.payload.turn.status, "value", str(event.payload.turn.status)
+            )
 
-    interrupt_preview = assistant_text_from_turn(interrupt_completed_turn).strip() or "[no assistant text]"
+    interrupt_preview = (
+        assistant_text_from_turn(interrupt_completed_turn).strip()
+        or "[no assistant text]"
+    )
 
     print("steer.result:", steer_result.model_dump(mode="json", by_alias=True))
     print("steer.final.status:", steer_completed_status)
