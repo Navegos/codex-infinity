@@ -73,17 +73,6 @@ fn parses_config_isolation_flags() {
     assert!(cli.ignore_user_config);
     assert!(cli.ignore_rules);
 }
-
-#[test]
-fn removed_full_auto_flag_reports_migration_path() {
-    let cli = Cli::parse_from(["codex-exec", "--full-auto", "summarize"]);
-
-    assert_eq!(
-        cli.removed_full_auto_warning(),
-        Some("warning: `--full-auto` is deprecated; use `--sandbox workspace-write` instead.")
-    );
-}
-
 #[test]
 fn resume_accepts_yolo3_after_subcommand() {
     let cli = Cli::parse_from(["codex-exec", "resume", "--last", "--yolo3", "summarize"]);

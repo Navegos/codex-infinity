@@ -11,6 +11,7 @@ use chrono::Utc;
 use codex_async_utils::CancelErr;
 use codex_async_utils::OrCancelExt;
 use codex_protocol::error::CodexErr;
+use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::UsageLimitReachedError;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::RateLimitReachedType;
@@ -58,12 +59,7 @@ pub(crate) async fn handle_retryable_response_stream_error(
     if *retries < max_retries {
         *retries += 1;
         let retry_count = *retries;
-        let delay = match &err {
-            CodexErr::Stream(_, requested_delay) => {
-                requested_delay.unwrap_or_else(|| backoff(retry_count))
-            }
-            _ => backoff(retry_count),
-        };
+        let delay = err.retry_delay().unwrap_or_else(|| backoff(retry_count));
         log_retry(request, turn_context, &err, retry_count, max_retries, delay);
 
         // In release builds, hide the first websocket retry notification to reduce noisy
@@ -93,22 +89,25 @@ pub(crate) async fn handle_retryable_response_stream_error(
 pub(crate) async fn wait_for_usage_limit_reset_if_applicable(
     sess: &Session,
     turn_context: &TurnContext,
-    err: UsageLimitReachedError,
+    err: CodexErr,
     cancellation_token: &CancellationToken,
 ) -> Result<(), CodexErr> {
-    if !is_auto_waitable_usage_limit(&err) {
-        return Err(CodexErr::UsageLimitReached(err));
+    let CodexErrorDetails::UsageLimitReached(limit) = err.details() else {
+        return Err(err);
+    };
+
+    if !is_auto_waitable_usage_limit(limit) {
+        return Err(err);
     }
 
-    let Some(resets_at) = err.resets_at else {
-        return Err(CodexErr::UsageLimitReached(err));
+    let Some(resets_at) = limit.resets_at else {
+        return Err(err);
     };
 
     let Some(delay) = delay_until_usage_limit_reset(resets_at) else {
-        return Err(CodexErr::UsageLimitReached(err));
+        return Err(err);
     };
 
-    let codex_err = CodexErr::UsageLimitReached(err);
     warn!(
         turn_id = %turn_context.sub_id,
         ?delay,
@@ -117,7 +116,7 @@ pub(crate) async fn wait_for_usage_limit_reset_if_applicable(
     sess.notify_stream_error(
         turn_context,
         "Waiting for usage limit to reset...".to_string(),
-        codex_err,
+        err,
     )
     .await;
 

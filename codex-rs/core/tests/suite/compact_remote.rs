@@ -4,11 +4,13 @@ use std::fs;
 use anyhow::Result;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use codex_core::StartThreadOptions;
 use codex_core::compact::SUMMARY_PREFIX;
 use codex_features::Feature;
 use codex_login::CodexAuth;
 use codex_login::auth::AgentIdentityAuth;
 use codex_login::auth::AgentIdentityAuthRecord;
+use codex_protocol::AgentPath;
 use codex_protocol::account::PlanType as AccountPlanType;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::dynamic_tools::DynamicToolCallOutputContentItem;
@@ -26,6 +28,7 @@ use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::protocol::ConversationStartParams;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::ItemStartedEvent;
 use codex_protocol::protocol::Op;
@@ -245,6 +248,7 @@ async fn start_realtime_conversation(codex: &codex_core::CodexThread) -> Result<
             codex_response_item_prefix: None,
             codex_response_handoff_mode:
                 codex_protocol::protocol::CodexResponseHandoffMode::Thinking,
+            codex_response_handoff_channel_prefixes: None,
             model: None,
             output_modality: RealtimeOutputModality::Audio,
             include_startup_context: true,
@@ -589,7 +593,7 @@ async fn remote_compact_uses_agent_identity_assertion() -> Result<()> {
                     task_id: Some("task-compact".to_string()),
                 },
                 "https://auth.openai.com/api/accounts",
-                /*auth_route_config*/ None,
+                &codex_login::test_support::transport_default_auth_route_config(),
             )
             .await?,
         )),
@@ -872,7 +876,7 @@ async fn assert_remote_manual_compact_request_parity(
             &normal_request,
             "Remote /responses/compact Request",
             &compact_request,
-            &ContextSnapshotOptions::default(),
+            &ContextSnapshotOptions::default().strip_response_item_ids(),
         )
     );
 
@@ -935,6 +939,10 @@ async fn remote_compact_v2_reuses_compaction_trigger_for_followups() -> Result<(
                 responses::ev_completed("resp-1"),
             ]),
             responses::sse(vec![
+                responses::ev_assistant_message("m-agent", "DELEGATED_TASK_REPLY"),
+                responses::ev_completed("resp-agent"),
+            ]),
+            responses::sse(vec![
                 serde_json::json!({
                     "type": "response.output_item.done",
                     "item": {
@@ -966,6 +974,31 @@ async fn remote_compact_v2_reuses_compaction_trigger_for_followups() -> Result<(
         .await?;
     wait_for_turn_complete(&codex).await;
 
+    codex
+        .submit(Op::InterAgentCommunication {
+            communication: InterAgentCommunication::new(
+                AgentPath::root().join("child").expect("valid child path"),
+                AgentPath::root(),
+                Vec::new(),
+                "Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/child\nPayload:\nchild completion".to_string(),
+                /*trigger_turn*/ false,
+            ),
+        })
+        .await?;
+    let delegated_task_ciphertext = format!("delegated compact task{}", "x".repeat(40_000));
+    codex
+        .submit(Op::InterAgentCommunication {
+            communication: InterAgentCommunication::new_encrypted(
+                AgentPath::root(),
+                AgentPath::root().join("worker").expect("valid worker path"),
+                Vec::new(),
+                delegated_task_ciphertext.clone(),
+                /*trigger_turn*/ true,
+            ),
+        })
+        .await?;
+    wait_for_turn_complete(&codex).await;
+
     codex.submit(Op::Compact).await?;
     wait_for_turn_complete(&codex).await;
 
@@ -984,7 +1017,22 @@ async fn remote_compact_v2_reuses_compaction_trigger_for_followups() -> Result<(
     wait_for_turn_complete(&codex).await;
 
     let response_requests = responses_mock.requests();
-    let compact_request = &response_requests[1];
+    let compact_request = &response_requests[2];
+    assert!(
+        compact_request
+            .inputs_of_type("agent_message")
+            .iter()
+            .any(|item| item["content"][1]["encrypted_content"].as_str()
+                == Some(delegated_task_ciphertext.as_str())),
+        "expected v2 compaction input to include the encrypted delegated task"
+    );
+    assert!(
+        compact_request
+            .inputs_of_type("agent_message")
+            .iter()
+            .any(|item| item.to_string().contains("child completion")),
+        "expected v2 compaction input to include the child completion"
+    );
     assert!(
         compact_request
             .header("x-codex-beta-features")
@@ -1034,6 +1082,21 @@ async fn remote_compact_v2_reuses_compaction_trigger_for_followups() -> Result<(
     );
 
     let follow_up_request = response_requests.last().expect("follow-up request missing");
+    assert!(
+        follow_up_request
+            .inputs_of_type("agent_message")
+            .iter()
+            .any(|item| item["content"][1]["encrypted_content"].as_str()
+                == Some(delegated_task_ciphertext.as_str())),
+        "expected v2 follow-up request to retain the encrypted delegated task"
+    );
+    assert!(
+        follow_up_request
+            .inputs_of_type("agent_message")
+            .iter()
+            .all(|item| !item.to_string().contains("child completion")),
+        "expected v2 follow-up request to omit the child completion"
+    );
     let follow_up_body = follow_up_request.body_json().to_string();
     assert!(
         follow_up_body.contains("\"type\":\"compaction\""),
@@ -1287,7 +1350,10 @@ async fn remote_compact_filters_deferred_dynamic_tools() -> Result<()> {
     })];
     let new_thread = test
         .thread_manager
-        .start_thread_with_tools(test.config.clone(), dynamic_tools)
+        .start_thread(StartThreadOptions {
+            dynamic_tools,
+            ..StartThreadOptions::new(test.config.clone())
+        })
         .await?;
     test.codex = new_thread.thread;
     test.session_configured = new_thread.session_configured;
@@ -1403,7 +1469,10 @@ async fn remote_compact_does_not_charge_inline_audio_payload_as_text() -> Result
     });
     let new_thread = test
         .thread_manager
-        .start_thread_with_tools(test.config.clone(), vec![dynamic_tool])
+        .start_thread(StartThreadOptions {
+            dynamic_tools: vec![dynamic_tool],
+            ..StartThreadOptions::new(test.config.clone())
+        })
         .await?;
     test.codex = new_thread.thread;
     test.session_configured = new_thread.session_configured;
@@ -2045,7 +2114,10 @@ async fn remote_compact_trims_tool_search_output_to_empty_tools_array() -> Resul
     let mut test = builder.build(&server).await?;
     let new_thread = test
         .thread_manager
-        .start_thread_with_tools(test.config.clone(), vec![dynamic_tool])
+        .start_thread(StartThreadOptions {
+            dynamic_tools: vec![dynamic_tool],
+            ..StartThreadOptions::new(test.config.clone())
+        })
         .await?;
     test.codex = new_thread.thread;
     test.session_configured = new_thread.session_configured;

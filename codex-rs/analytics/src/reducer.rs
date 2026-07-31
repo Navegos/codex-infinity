@@ -133,6 +133,7 @@ use codex_login::default_client::originator;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
+use codex_protocol::items::is_safe_plugin_relative_path;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SkillScope;
@@ -335,6 +336,7 @@ impl ThreadMetadataState {
 enum RequestState {
     TurnStart(PendingTurnStartState),
     TurnSteer(PendingTurnSteerState),
+    ExplicitClientInterrupt(PendingTurnInterruptState),
 }
 
 struct PendingTurnStartState {
@@ -347,6 +349,11 @@ struct PendingTurnSteerState {
     expected_turn_id: String,
     num_input_images: usize,
     created_at: u64,
+}
+
+struct PendingTurnInterruptState {
+    turn_id: String,
+    requested_at_ms: u64,
 }
 
 #[derive(Clone)]
@@ -367,6 +374,7 @@ struct TurnState {
     token_usage: Option<TokenUsage>,
     profile: Option<TurnProfile>,
     completed: Option<CompletedTurnState>,
+    explicit_client_interrupt_requested_at_ms: Option<u64>,
     codex_error: Option<TurnCodexError>,
     latest_diff: Option<String>,
     steer_count: usize,
@@ -443,6 +451,20 @@ impl AnalyticsReducer {
                 request,
             } => {
                 self.ingest_request(connection_id, request_id, *request);
+            }
+            AnalyticsFact::ExplicitClientInterruptRequest {
+                connection_id,
+                request_id,
+                turn_id,
+                requested_at_ms,
+            } => {
+                self.requests.insert(
+                    (connection_id, request_id),
+                    RequestState::ExplicitClientInterrupt(PendingTurnInterruptState {
+                        turn_id,
+                        requested_at_ms,
+                    }),
+                );
             }
             AnalyticsFact::ClientResponse {
                 connection_id,
@@ -758,6 +780,7 @@ impl AnalyticsReducer {
                         repo_url,
                         skill_scope: Some(skill_scope.to_string()),
                         plugin_id: invocation.plugin_id,
+                        remote_plugin_id: invocation.remote_plugin_id,
                     },
                 },
             ));
@@ -958,6 +981,21 @@ impl AnalyticsReducer {
                 response,
             } => {
                 self.ingest_turn_steer_response(connection_id, request_id, response, out);
+            }
+            ClientResponse::TurnInterrupt { request_id, .. } => {
+                let Some(RequestState::ExplicitClientInterrupt(pending_request)) =
+                    self.requests.remove(&(connection_id, request_id))
+                else {
+                    return;
+                };
+                let turn_id = pending_request.turn_id;
+                let turn_state = self.turns.entry(turn_id.clone()).or_default();
+                let earliest_requested_at_ms = turn_state
+                    .explicit_client_interrupt_requested_at_ms
+                    .get_or_insert(pending_request.requested_at_ms);
+                *earliest_requested_at_ms =
+                    (*earliest_requested_at_ms).min(pending_request.requested_at_ms);
+                self.maybe_emit_turn_event(&turn_id, out).await;
             }
             _ => {}
         }
@@ -1194,6 +1232,7 @@ impl AnalyticsReducer {
                     out,
                 );
             }
+            RequestState::ExplicitClientInterrupt(_) => {}
         }
     }
 
@@ -1799,6 +1838,8 @@ fn tool_item_event(input: ToolItemEventInput<'_>) -> Option<TrackEventRequest> {
     match item {
         ThreadItem::CommandExecution {
             id,
+            plugin_id,
+            script_path,
             source,
             status,
             command_actions,
@@ -1832,6 +1873,11 @@ fn tool_item_event(input: ToolItemEventInput<'_>) -> Option<TrackEventRequest> {
                     event_type: "codex_command_execution_event",
                     event_params: CodexCommandExecutionEventParams {
                         base,
+                        plugin_id: plugin_id.clone(),
+                        script_path: safe_plugin_relative_script_path(
+                            plugin_id.as_deref(),
+                            script_path.as_deref(),
+                        ),
                         command_execution_source: *source,
                         exit_code: *exit_code,
                         command_total_action_count: action_counts.total,
@@ -2106,6 +2152,14 @@ fn tool_item_event(input: ToolItemEventInput<'_>) -> Option<TrackEventRequest> {
         }
         _ => None,
     }
+}
+
+fn safe_plugin_relative_script_path(
+    plugin_id: Option<&str>,
+    script_path: Option<&str>,
+) -> Option<String> {
+    let script_path = script_path.filter(|path| is_safe_plugin_relative_path(path))?;
+    plugin_id.map(|_| script_path.to_string())
 }
 
 struct ToolItemOutcome {
@@ -2636,6 +2690,7 @@ fn codex_turn_event_params(
     let TurnProfile {
         before_first_sampling_ms,
         sampling_ms,
+        compaction_ms,
         between_sampling_overhead_ms,
         tool_blocking_ms,
         after_last_sampling_ms,
@@ -2676,6 +2731,8 @@ fn codex_turn_event_params(
         num_input_images,
         is_first_turn,
         status: completed.status,
+        explicit_client_interrupt_requested_at_ms: turn_state
+            .explicit_client_interrupt_requested_at_ms,
         turn_error: completed.turn_error,
         codex_error_kind: codex_error.map(|error| error.kind),
         codex_error_http_status_code: codex_error.and_then(|error| error.http_status_code),
@@ -2708,6 +2765,7 @@ fn codex_turn_event_params(
             .map(|token_usage| token_usage.total_tokens),
         before_first_sampling_ms,
         sampling_ms,
+        compaction_ms,
         between_sampling_overhead_ms,
         tool_blocking_ms,
         after_last_sampling_ms,
@@ -2834,10 +2892,53 @@ pub(crate) fn normalize_path_for_skill_id(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use codex_app_server_protocol::JSONRPCErrorError;
     use codex_protocol::models::SandboxEnforcement;
     use codex_protocol::permissions::FileSystemSandboxPolicy;
     use codex_protocol::permissions::NetworkSandboxPolicy;
     use pretty_assertions::assert_eq;
+
+    #[tokio::test]
+    async fn rejected_turn_interrupt_removes_pending_analytics_request() {
+        let mut reducer = AnalyticsReducer::default();
+        let mut out = Vec::new();
+        let connection_id = 7;
+        let request_id = RequestId::Integer(4);
+        let request_key = (connection_id, request_id.clone());
+
+        reducer
+            .ingest(
+                AnalyticsFact::ExplicitClientInterruptRequest {
+                    connection_id,
+                    request_id: request_id.clone(),
+                    turn_id: "turn-2".to_string(),
+                    requested_at_ms: 1716000000123,
+                },
+                &mut out,
+            )
+            .await;
+
+        assert!(reducer.requests.contains_key(&request_key));
+
+        reducer
+            .ingest(
+                AnalyticsFact::ErrorResponse {
+                    connection_id,
+                    request_id,
+                    error: JSONRPCErrorError {
+                        code: -32600,
+                        message: "no active turn to interrupt".to_string(),
+                        data: None,
+                    },
+                    error_type: None,
+                },
+                &mut out,
+            )
+            .await;
+
+        assert!(!reducer.requests.contains_key(&request_key));
+        assert!(out.is_empty());
+    }
 
     #[test]
     fn managed_full_disk_with_restricted_network_reports_external_sandbox() {
@@ -2884,6 +2985,25 @@ mod tests {
                 image: 1,
                 audio: 1,
             }
+        );
+    }
+
+    #[test]
+    fn command_execution_script_paths_reject_unsafe_values() {
+        assert_eq!(
+            safe_plugin_relative_script_path(
+                Some("sample@openai-curated"),
+                Some("/home/user/.codex/plugins/cache/openai-curated/sample/scripts/run.py"),
+            ),
+            None
+        );
+        assert_eq!(
+            safe_plugin_relative_script_path(Some("sample@openai-curated"), Some("scripts/run.py"),),
+            Some("scripts/run.py".to_string())
+        );
+        assert_eq!(
+            safe_plugin_relative_script_path(/*plugin_id*/ None, Some("scripts/run.py"),),
+            None
         );
     }
 }
