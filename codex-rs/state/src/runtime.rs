@@ -22,6 +22,7 @@ use crate::telemetry::DbKind;
 use crate::telemetry::DbTelemetry;
 use chrono::DateTime;
 use chrono::Utc;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::RolloutItem;
 use serde_json::Value;
@@ -31,9 +32,13 @@ use sqlx::Sqlite;
 use sqlx::SqliteConnection;
 use sqlx::SqlitePool;
 use std::collections::BTreeSet;
+use std::future::Future;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use std::sync::atomic::AtomicI64;
 use std::time::Instant;
 use tracing::warn;
@@ -63,8 +68,11 @@ pub use recovery::RuntimeDbBackup;
 pub(super) use recovery::RuntimeDbInitError;
 pub use recovery::backup_runtime_db_for_fresh_start;
 pub use recovery::is_sqlite_corruption_error;
+pub use recovery::is_sqlite_full_error;
+pub use recovery::is_sqlite_lock_error;
 pub use recovery::runtime_db_path_for_corruption_error;
 pub use recovery::sqlite_error_detail_is_corruption;
+pub use recovery::sqlite_error_detail_is_full;
 pub use recovery::sqlite_error_detail_is_lock;
 pub use remote_control::RemoteControlEnrollmentRecord;
 pub use threads::ThreadFilterOptions;
@@ -77,6 +85,10 @@ pub use threads::ThreadFilterOptions;
 // metadata, rather than the exact sum of all persisted SQLite column bytes.
 const LOG_PARTITION_SIZE_LIMIT_BYTES: i64 = 10 * 1024 * 1024;
 const LOG_PARTITION_ROW_LIMIT: i64 = 1_000;
+const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
+const SQLITE_LOCK_STARTUP_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
+const SQLITE_LOCK_STARTUP_RETRY_INTERVAL: Duration = Duration::from_millis(250);
+const SQLITE_FALLBACK_HOME_ENV: &str = "CODEX_SQLITE_FALLBACK_HOME";
 
 #[derive(Clone)]
 pub struct StateRuntime {
@@ -98,7 +110,8 @@ impl StateRuntime {
     /// Logs and paginated thread history live in dedicated files to reduce
     /// lock contention with the rest of the state store.
     pub async fn init(sqlite: SqliteConfig, default_provider: String) -> anyhow::Result<Arc<Self>> {
-        Self::init_inner(sqlite, default_provider, /*telemetry_override*/ None).await
+        Self::init_with_full_disk_fallback(sqlite, default_provider, /*telemetry_override*/ None)
+            .await
     }
 
     #[cfg(test)]
@@ -107,7 +120,76 @@ impl StateRuntime {
         default_provider: String,
         telemetry_override: &dyn DbTelemetry,
     ) -> anyhow::Result<Arc<Self>> {
-        Self::init_inner(sqlite, default_provider, Some(telemetry_override)).await
+        Self::init_with_full_disk_fallback(sqlite, default_provider, Some(telemetry_override)).await
+    }
+
+    /// Initialize the runtime, falling back to an alternate sqlite home when the
+    /// configured one is out of disk space.
+    async fn init_with_full_disk_fallback(
+        sqlite: SqliteConfig,
+        default_provider: String,
+        telemetry_override: Option<&dyn DbTelemetry>,
+    ) -> anyhow::Result<Arc<Self>> {
+        let primary_home = sqlite.home().to_path_buf();
+        let err = match Self::init_inner(sqlite, default_provider.clone(), telemetry_override).await
+        {
+            Ok(runtime) => return Ok(runtime),
+            Err(err) if recovery::is_sqlite_full_error(&err) => err,
+            Err(err) => return Err(err),
+        };
+
+        let primary_error = format!("{err:#}");
+        let mut fallback_errors = Vec::new();
+        for fallback_home in fallback_sqlite_homes(primary_home.as_path()) {
+            if fallback_home == primary_home {
+                continue;
+            }
+            warn!(
+                "sqlite home at {} appears full; trying fallback sqlite home at {}",
+                primary_home.display(),
+                fallback_home.display()
+            );
+            crate::telemetry::record_fallback(
+                "state_runtime_init",
+                "disk_full",
+                telemetry_override,
+            );
+            if let Err(fallback_err) =
+                prepare_sqlite_home_for_fallback(fallback_home.as_path()).await
+            {
+                fallback_errors.push(format!("{}: {}", fallback_home.display(), fallback_err));
+                continue;
+            }
+            let fallback_home_abs = match AbsolutePathBuf::try_from(fallback_home.clone()) {
+                Ok(path) => path,
+                Err(fallback_err) => {
+                    fallback_errors.push(format!("{}: {fallback_err}", fallback_home.display()));
+                    continue;
+                }
+            };
+            match Self::init_inner(
+                SqliteConfig::from_sqlite_home(fallback_home_abs),
+                default_provider.clone(),
+                telemetry_override,
+            )
+            .await
+            {
+                Ok(runtime) => return Ok(runtime),
+                Err(fallback_err) => {
+                    fallback_errors.push(format!("{}: {fallback_err:#}", fallback_home.display()))
+                }
+            }
+        }
+
+        let fallback_errors = if fallback_errors.is_empty() {
+            "no fallback sqlite homes were available".to_string()
+        } else {
+            fallback_errors.join("; ")
+        };
+        Err(err.context(format!(
+            "sqlite home at {} appears full; fallback sqlite homes failed ({fallback_errors}); primary error: {primary_error}",
+            primary_home.display()
+        )))
     }
 
     async fn init_inner(
@@ -171,7 +253,10 @@ impl StateRuntime {
             }
         };
         let started = Instant::now();
-        let backfill_state_result = ensure_backfill_state_row_in_pool(pool.as_ref()).await;
+        let backfill_state_result = retry_on_sqlite_lock("ensure_backfill_state", || {
+            ensure_backfill_state_row_in_pool(pool.as_ref())
+        })
+        .await;
         crate::telemetry::record_init_result(
             telemetry_override,
             DbKind::State,
@@ -191,12 +276,15 @@ impl StateRuntime {
         }
         let started = Instant::now();
         let thread_timestamp_millis_result: anyhow::Result<(Option<i64>, Option<i64>)> =
-            sqlx::query_as(
-                "SELECT MAX(threads.updated_at_ms), MAX(threads.recency_at_ms) FROM threads",
-            )
-            .fetch_one(pool.as_ref())
-            .await
-            .map_err(anyhow::Error::from);
+            retry_on_sqlite_lock("post_init_query", || async {
+                sqlx::query_as(
+                    "SELECT MAX(threads.updated_at_ms), MAX(threads.recency_at_ms) FROM threads",
+                )
+                .fetch_one(pool.as_ref())
+                .await
+                .map_err(anyhow::Error::from)
+            })
+            .await;
         crate::telemetry::record_init_result(
             telemetry_override,
             DbKind::State,
@@ -288,6 +376,80 @@ pub async fn open_thread_history_db(sqlite: &SqliteConfig) -> anyhow::Result<Sql
     sqlite
         .open_thread_history_db(&migrator, /*telemetry_override*/ None)
         .await
+}
+
+async fn retry_on_sqlite_lock<T, Fut>(
+    phase: &'static str,
+    mut operation: impl FnMut() -> Fut,
+) -> anyhow::Result<T>
+where
+    Fut: Future<Output = anyhow::Result<T>>,
+{
+    let started = Instant::now();
+    let mut attempts = 0_u32;
+    loop {
+        match operation().await {
+            Ok(value) => return Ok(value),
+            Err(err)
+                if recovery::is_sqlite_lock_error(&err)
+                    && started.elapsed() < SQLITE_LOCK_STARTUP_RETRY_TIMEOUT =>
+            {
+                attempts += 1;
+                warn!(
+                    "sqlite startup phase {phase} is waiting for another writer; retrying attempt {attempts}"
+                );
+                tokio::time::sleep(SQLITE_LOCK_STARTUP_RETRY_INTERVAL).await;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
+fn fallback_sqlite_homes(primary: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(raw) = std::env::var_os(SQLITE_FALLBACK_HOME_ENV)
+        && !raw.as_os_str().is_empty()
+    {
+        candidates.push(PathBuf::from(raw));
+    }
+    if let Some(cache_dir) = dirs::cache_dir() {
+        candidates.push(cache_dir.join("codex").join("sqlite-fallback"));
+    }
+    candidates.push(std::env::temp_dir().join("codex-sqlite-fallback"));
+
+    let suffix = sqlite_home_suffix(primary);
+    candidates
+        .into_iter()
+        .map(|candidate| candidate.join(suffix.as_str()))
+        .collect()
+}
+
+fn sqlite_home_suffix(primary: &Path) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    primary.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+async fn prepare_sqlite_home_for_fallback(path: &Path) -> std::io::Result<()> {
+    tokio::fs::create_dir_all(path).await?;
+    set_private_dir_permissions(path).await?;
+    let probe = path.join(".codex-write-probe");
+    tokio::fs::write(probe.as_path(), b"ok").await?;
+    tokio::fs::remove_file(probe).await?;
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn set_private_dir_permissions(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let permissions = std::fs::Permissions::from_mode(0o700);
+    tokio::fs::set_permissions(path, permissions).await
+}
+
+#[cfg(not(unix))]
+async fn set_private_dir_permissions(_path: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 pub(super) async fn ensure_backfill_state_row_in_pool(

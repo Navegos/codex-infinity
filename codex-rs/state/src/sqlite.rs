@@ -26,6 +26,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 
+/// Wait longer than the sqlx default before surfacing `SQLITE_BUSY`, so
+/// concurrent Codex processes contend instead of failing startup.
+const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
+
 const LOGS_DB_FILENAME: &str = "logs_2.sqlite";
 const GOALS_DB_FILENAME: &str = "goals_1.sqlite";
 const MEMORIES_DB_FILENAME: &str = "memories_1.sqlite";
@@ -253,7 +257,7 @@ impl SqliteConfig {
             .journal_mode(SqliteJournalMode::Wal)
             .synchronous(SqliteSynchronous::Normal)
             .auto_vacuum(SqliteAutoVacuum::Incremental)
-            .busy_timeout(Duration::from_secs(5))
+            .busy_timeout(SQLITE_BUSY_TIMEOUT)
             .log_statements(LevelFilter::Off);
         SqlitePoolOptions::new()
             .max_connections(5)

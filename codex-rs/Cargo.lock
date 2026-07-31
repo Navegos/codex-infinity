@@ -4083,6 +4083,7 @@ dependencies = [
  "codex-git-utils",
  "codex-protocol",
  "codex-utils-absolute-path",
+ "dirs",
  "libsqlite3-sys",
  "log",
  "pretty_assertions",

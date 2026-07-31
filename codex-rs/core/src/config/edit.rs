@@ -7,6 +7,8 @@ use codex_config::types::ResumeCwdMode;
 use codex_config::types::SessionPickerViewMode;
 use codex_config::types::ToolSuggestDisabledTool;
 use codex_features::FEATURES;
+use codex_features::feature_for_key;
+use codex_features::legacy_feature_keys;
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::config_types::TrustLevel;
@@ -867,6 +869,8 @@ impl ConfigEditsBuilder {
     /// graduates to globally enabled. Structured multi-agent v2 settings are
     /// an exception: its explicit `enabled = false` preserves nested options.
     pub fn set_feature_enabled(mut self, key: &str, enabled: bool) -> Self {
+        let feature = feature_for_key(key);
+        let key = feature.map_or(key, |feature| feature.key());
         let mut segments = vec!["features".to_string(), key.to_string()];
         if key == "multi_agent_v2" && !enabled {
             segments.push("enabled".to_string());
@@ -887,6 +891,15 @@ impl ConfigEditsBuilder {
             });
         } else {
             self.edits.push(ConfigEdit::ClearPath { segments });
+        }
+        if let Some(feature) = feature {
+            for legacy_key in legacy_feature_keys() {
+                if legacy_key != key && feature_for_key(legacy_key) == Some(feature) {
+                    self.edits.push(ConfigEdit::ClearPath {
+                        segments: vec!["features".to_string(), legacy_key.to_string()],
+                    });
+                }
+            }
         }
         self
     }

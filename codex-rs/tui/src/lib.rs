@@ -286,14 +286,26 @@ async fn init_state_db_for_app_server_target(
     app_server_target: &AppServerTarget,
 ) -> std::io::Result<Option<StateDbHandle>> {
     match app_server_target {
-        AppServerTarget::Embedded => state_db::try_init(config).await.map(Some).map_err(|err| {
-            let database_path = codex_state::runtime_db_path_for_corruption_error(&err)
-                .unwrap_or_else(|| config.sqlite_config().state_db_path());
-            std::io::Error::other(LocalStateDbStartupError::new(
-                database_path,
-                format!("{err:#}"),
-            ))
-        }),
+        AppServerTarget::Embedded => match state_db::try_init(config).await {
+            Ok(state_db) => Ok(Some(state_db)),
+            Err(err)
+                if codex_state::is_sqlite_lock_error(&err)
+                    || codex_state::is_sqlite_full_error(&err) =>
+            {
+                tracing::warn!(
+                    "continuing without sqlite state db after startup contention or disk pressure: {err:#}"
+                );
+                Ok(None)
+            }
+            Err(err) => {
+                let database_path = codex_state::runtime_db_path_for_corruption_error(&err)
+                    .unwrap_or_else(|| config.sqlite_config().state_db_path());
+                Err(std::io::Error::other(LocalStateDbStartupError::new(
+                    database_path,
+                    format!("{err:#}"),
+                )))
+            }
+        },
         AppServerTarget::LocalDaemon { .. } | AppServerTarget::Remote { .. } => {
             Ok(state_db::get_state_db(config).await)
         }
@@ -2019,7 +2031,9 @@ async fn load_bootstrap_config_or_exit(
     }
 }
 
-/// Trust prompts are disabled in this fork; start directly in the agent.
+/// Directory trust no longer blocks startup. Undecided projects continue with
+/// project-local config, hooks, and exec policies disabled until explicitly
+/// trusted in config.
 fn should_show_trust_screen(_config: &Config) -> bool {
     false
 }

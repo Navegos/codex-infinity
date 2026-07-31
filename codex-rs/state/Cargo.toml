@@ -9,6 +9,7 @@ anyhow = { workspace = true }
 chrono = { workspace = true }
 codex-protocol = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
+dirs = { workspace = true }
 libsqlite3-sys = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

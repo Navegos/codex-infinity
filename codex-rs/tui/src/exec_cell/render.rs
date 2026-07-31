@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::Instant;
 
 use super::model::CommandOutput;
@@ -6,10 +7,8 @@ use super::model::ExecCell;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::plain_lines;
-use crate::motion::MotionMode;
-use crate::motion::ReducedMotionIndicator;
-use crate::motion::activity_indicator;
 use crate::render::highlight::highlight_bash_to_lines;
+use crate::render::highlight::highlight_code_to_lines;
 use crate::render::line_utils::prefix_lines;
 use crate::render::line_utils::push_owned_lines;
 use crate::ui_consts::TRANSCRIPT_HINT;
@@ -19,9 +18,9 @@ use crate::wrapping::adaptive_wrap_lines;
 use codex_ansi_escape::ansi_escape_line;
 use codex_app_server_protocol::CommandExecutionSource as ExecCommandSource;
 use codex_protocol::parse_command::ParsedCommand;
+use itertools::Itertools;
 use codex_shell_command::bash::extract_bash_command;
 use codex_utils_elapsed::format_duration;
-use itertools::Itertools;
 use ratatui::prelude::*;
 use ratatui::style::Modifier;
 use ratatui::style::Stylize;
@@ -104,6 +103,14 @@ pub(crate) fn output_lines(
     output: Option<&CommandOutput>,
     params: OutputLinesParams,
 ) -> OutputLines {
+    output_lines_with_renderer(output, params, ansi_escape_line)
+}
+
+fn output_lines_with_renderer(
+    output: Option<&CommandOutput>,
+    params: OutputLinesParams,
+    render_line: impl Fn(&str) -> Line<'static>,
+) -> OutputLines {
     let OutputLinesParams {
         line_limit,
         only_err,
@@ -131,7 +138,7 @@ pub(crate) fn output_lines(
 
     let head_end = total.min(line_limit).min(retained);
     for (i, raw) in output.lines().take(head_end).enumerate() {
-        let mut line = ansi_escape_line(raw.as_ref());
+        let mut line = render_line(raw.as_ref());
         let prefix = if !include_prefix {
             ""
         } else if i == 0 && include_angle_pipe {
@@ -158,7 +165,7 @@ pub(crate) fn output_lines(
 
     let tail = output.lines().rev().take(tail_len).collect_vec();
     for raw in tail.into_iter().rev() {
-        let mut line = ansi_escape_line(raw.as_ref());
+        let mut line = render_line(raw.as_ref());
         if include_prefix {
             line.spans.insert(0, "    ".into());
         }
@@ -174,13 +181,116 @@ pub(crate) fn output_lines(
     }
 }
 
-fn activity_marker(start_time: Option<Instant>, animations_enabled: bool) -> Span<'static> {
-    activity_indicator(
-        start_time,
-        MotionMode::from_animations_enabled(animations_enabled),
-        ReducedMotionIndicator::StaticBullet,
+fn command_detail_line(parsed: &ParsedCommand) -> (String, Vec<Span<'static>>) {
+    match parsed {
+        ParsedCommand::Read { cmd, name, .. } => command_label_and_detail(cmd, Some(name)),
+        ParsedCommand::ListFiles { cmd, path } => command_label_and_detail(cmd, path.as_deref()),
+        ParsedCommand::Search { cmd, query, path } => {
+            let fallback = match (query.as_deref(), path.as_deref()) {
+                (Some(query), Some(path)) => Some(format!("{query} in {path}")),
+                (Some(query), None) => Some(query.to_string()),
+                (None, Some(path)) => Some(path.to_string()),
+                (None, None) => None,
+            };
+            command_label_and_detail(cmd, fallback.as_deref())
+        }
+        ParsedCommand::Unknown { cmd } => command_label_and_detail(cmd, None),
+    }
+}
+
+fn command_label_and_detail(
+    cmd: &str,
+    fallback_detail: Option<&str>,
+) -> (String, Vec<Span<'static>>) {
+    let trimmed = cmd.trim();
+    if trimmed.is_empty() {
+        return (
+            "Run".to_string(),
+            fallback_detail
+                .map(|detail| vec![detail.to_string().into()])
+                .unwrap_or_default(),
+        );
+    }
+
+    let mut parts = trimmed.splitn(2, char::is_whitespace);
+    let label = parts.next().unwrap_or("Run").to_string();
+    let detail = parts
+        .next()
+        .map(str::trim)
+        .filter(|detail| !detail.is_empty())
+        .or(fallback_detail);
+    (
+        label,
+        detail
+            .map(|detail| vec![detail.to_string().into()])
+            .unwrap_or_default(),
     )
-    .unwrap_or_else(|| "•".dim())
+}
+
+fn output_language_for_call(call: &ExecCall) -> Option<String> {
+    call.parsed.iter().find_map(|parsed| match parsed {
+        ParsedCommand::Read { path, .. } => path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(ToString::to_string),
+        ParsedCommand::Search { path, .. } => path
+            .as_deref()
+            .and_then(extension_from_path_like)
+            .map(ToString::to_string),
+        ParsedCommand::ListFiles { .. } | ParsedCommand::Unknown { .. } => None,
+    })
+}
+
+fn extension_from_path_like(path: &str) -> Option<&str> {
+    Path::new(path).extension()?.to_str()
+}
+
+fn highlighted_output_line_for_call(
+    call: &ExecCall,
+    fallback_lang: Option<&str>,
+    raw: &str,
+) -> Line<'static> {
+    if call
+        .parsed
+        .iter()
+        .any(|parsed| matches!(parsed, ParsedCommand::Search { .. }))
+        && let Some(line) = highlighted_search_result_line(raw)
+    {
+        return line;
+    }
+    if let Some(lang) = fallback_lang {
+        let mut lines = highlight_code_to_lines(raw, lang);
+        if let Some(line) = lines.pop() {
+            return line;
+        }
+    }
+    ansi_escape_line(raw)
+}
+
+fn highlighted_search_result_line(raw: &str) -> Option<Line<'static>> {
+    let (path, line_number, code) = raw.match_indices(':').find_map(|(idx, _)| {
+        let path = &raw[..idx];
+        let rest = &raw[idx + 1..];
+        let (line_number, code) = rest.split_once(':')?;
+        if line_number.is_empty() || !line_number.chars().all(|ch| ch.is_ascii_digit()) {
+            return None;
+        }
+        Some((path, line_number, code))
+    })?;
+    let extension = extension_from_path_like(path)?;
+
+    let mut spans = vec![
+        path.to_string().dim(),
+        ":".dim(),
+        line_number.to_string().dim(),
+        ":".dim(),
+    ];
+    if let Some(highlighted) = highlight_code_to_lines(code, extension).into_iter().next() {
+        spans.extend(highlighted.spans);
+    } else {
+        spans.push(code.to_string().into());
+    }
+    Some(Line::from(spans))
 }
 
 impl HistoryCell for ExecCell {
@@ -210,12 +320,12 @@ impl HistoryCell for ExecCell {
 
             if let Some(output) = call.output.as_ref() {
                 if !call.is_unified_exec_interaction() {
+                    let fallback_lang = output_language_for_call(call);
                     let wrap_width = width.max(1) as usize;
                     let wrap_opts = RtOptions::new(wrap_width);
-                    for unwrapped in output
-                        .transcript_lines()
-                        .map(|line| ansi_escape_line(line.as_ref()))
-                    {
+                    for unwrapped in output.transcript_lines().map(|line| {
+                        highlighted_output_line_for_call(call, fallback_lang.as_deref(), line.as_ref())
+                    }) {
                         let wrapped = adaptive_wrap_line(&unwrapped, wrap_opts.clone());
                         push_owned_lines(&wrapped, &mut lines);
                     }
@@ -255,11 +365,7 @@ impl ExecCell {
     fn exploring_display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut out: Vec<Line<'static>> = Vec::new();
         out.push(Line::from(vec![
-            if self.is_active() {
-                activity_marker(self.active_start_time(), self.animations_enabled())
-            } else {
-                "•".dim()
-            },
+            "•".dim(),
             " ".into(),
             if self.is_active() {
                 "Exploring".bold()
@@ -290,7 +396,7 @@ impl ExecCell {
             let (group, remaining) = calls.split_at(group_len);
             calls = remaining;
 
-            let call_lines: Vec<(&str, Vec<Span<'static>>)> = if reads_only {
+            let call_lines: Vec<(String, Vec<Span<'static>>)> = if reads_only {
                 let names = group
                     .iter()
                     .flat_map(|call| &call.parsed)
@@ -300,40 +406,20 @@ impl ExecCell {
                     })
                     .unique();
                 vec![(
-                    "Read",
+                    "Read".to_string(),
                     Itertools::intersperse(names.into_iter().map(Into::into), ", ".dim()).collect(),
                 )]
             } else {
-                let mut lines = Vec::new();
-                for parsed in &call.parsed {
-                    match parsed {
-                        ParsedCommand::Read { name, .. } => {
-                            lines.push(("Read", vec![name.clone().into()]));
-                        }
-                        ParsedCommand::ListFiles { cmd, path } => {
-                            lines.push(("List", vec![path.clone().unwrap_or(cmd.clone()).into()]));
-                        }
-                        ParsedCommand::Search { cmd, query, path } => {
-                            let spans = match (query, path) {
-                                (Some(q), Some(p)) => {
-                                    vec![q.clone().into(), " in ".dim(), p.clone().into()]
-                                }
-                                (Some(q), None) => vec![q.clone().into()],
-                                _ => vec![cmd.clone().into()],
-                            };
-                            lines.push(("Search", spans));
-                        }
-                        ParsedCommand::Unknown { cmd } => {
-                            lines.push(("Run", vec![cmd.clone().into()]));
-                        }
-                    }
-                }
-                lines
+                call.parsed.iter().map(command_detail_line).collect()
             };
 
             for (title, line) in call_lines {
                 let line = Line::from(line);
-                let initial_indent = Line::from(vec![title.cyan(), " ".into()]);
+                let initial_indent = if line.spans.is_empty() {
+                    Line::from(title.cyan())
+                } else {
+                    Line::from(vec![title.cyan(), " ".into()])
+                };
                 let subsequent_indent = " ".repeat(initial_indent.width()).into();
                 let wrapped = adaptive_wrap_line(
                     &line,
@@ -360,7 +446,7 @@ impl ExecCell {
         let bullet = match success {
             Some(true) => "•".green().bold(),
             Some(false) => "•".red().bold(),
-            None => activity_marker(call.start_time, self.animations_enabled()),
+            None => "•".dim(),
         };
         let is_interaction = call.is_unified_exec_interaction();
         let title = if is_interaction {
@@ -434,7 +520,8 @@ impl ExecCell {
             } else {
                 TOOL_CALL_MAX_LINES
             };
-            let raw_output = output_lines(
+            let fallback_lang = output_language_for_call(call);
+            let raw_output = output_lines_with_renderer(
                 Some(output),
                 OutputLinesParams {
                     line_limit,
@@ -442,6 +529,7 @@ impl ExecCell {
                     include_angle_pipe: false,
                     include_prefix: false,
                 },
+                |line| highlighted_output_line_for_call(call, fallback_lang.as_deref(), line),
             );
             let display_limit = if call.is_user_shell_command() {
                 USER_SHELL_TOOL_CALL_MAX_LINES
@@ -1100,6 +1188,113 @@ mod tests {
                 .count(),
             1,
             "expected full URL-like query in one rendered line, got: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn exploring_display_uses_shell_command_labels() {
+        let call = ExecCall {
+            call_id: "call-id".to_string(),
+            command: vec!["bash".into(), "-lc".into(), "echo done".into()],
+            parsed: vec![
+                ParsedCommand::Search {
+                    cmd: "rg shimmer_spans codex-rs/tui/src".into(),
+                    query: Some("shimmer_spans".into()),
+                    path: Some("codex-rs/tui/src".into()),
+                },
+                ParsedCommand::Read {
+                    cmd: "sed -n '1,40p' codex-rs/tui/src/status_indicator_widget.rs".into(),
+                    name: "status_indicator_widget.rs".into(),
+                    path: "codex-rs/tui/src/status_indicator_widget.rs".into(),
+                },
+            ],
+            output: None,
+            source: ExecCommandSource::Agent,
+            start_time: None,
+            duration: None,
+            interaction_input: None,
+        };
+
+        let cell = ExecCell::new(call, /*animations_enabled*/ false);
+        let rendered = cell
+            .display_lines(/*width*/ 100)
+            .iter()
+            .map(render_line_text)
+            .join("\n");
+
+        assert!(rendered.contains("rg shimmer_spans codex-rs/tui/src"));
+        assert!(rendered.contains("sed -n '1,40p' codex-rs/tui/src/status_indicator_widget.rs"));
+        assert!(!rendered.contains("Search shimmer_spans"));
+        assert!(!rendered.contains("Read status_indicator_widget.rs"));
+    }
+
+    #[test]
+    fn read_output_uses_file_extension_for_syntax_highlighting() {
+        let call = ExecCall {
+            call_id: "call-id".to_string(),
+            command: vec![
+                "bash".into(),
+                "-lc".into(),
+                "sed -n '1,3p' src/main.rs".into(),
+            ],
+            parsed: vec![ParsedCommand::Read {
+                cmd: "sed -n '1,3p' src/main.rs".into(),
+                name: "main.rs".into(),
+                path: "src/main.rs".into(),
+            }],
+            output: Some(CommandOutput {
+                exit_code: 0,
+                aggregated_output: "fn main() { let value = 1; }".to_string(),
+                formatted_output: "fn main() { let value = 1; }".to_string(),
+            }),
+            source: ExecCommandSource::Agent,
+            start_time: None,
+            duration: None,
+            interaction_input: None,
+        };
+
+        let cell = ExecCell::new(call, /*animations_enabled*/ false);
+        let lines = cell.display_lines(/*width*/ 100);
+
+        assert!(
+            lines.iter().any(|line| line
+                .spans
+                .iter()
+                .any(|span| span.content.as_ref() == "fn" && span.style.fg.is_some())),
+            "expected Rust keyword in read output to be syntax highlighted: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn search_output_highlights_result_code_by_path_extension() {
+        let call = ExecCall {
+            call_id: "call-id".to_string(),
+            command: vec!["bash".into(), "-lc".into(), "rg 'fn main' src".into()],
+            parsed: vec![ParsedCommand::Search {
+                cmd: "rg 'fn main' src".into(),
+                query: Some("fn main".into()),
+                path: Some("src".into()),
+            }],
+            output: Some(CommandOutput {
+                exit_code: 0,
+                aggregated_output: r"C:\src\main.rs:12:fn main() {".to_string(),
+                formatted_output: r"C:\src\main.rs:12:fn main() {".to_string(),
+            }),
+            source: ExecCommandSource::Agent,
+            start_time: None,
+            duration: None,
+            interaction_input: None,
+        };
+
+        let cell = ExecCell::new(call, /*animations_enabled*/ false);
+        let lines = cell.display_lines(/*width*/ 100);
+
+        assert!(
+            lines.iter().any(|line| line
+                .spans
+                .iter()
+                .any(|span| span.content.as_ref() == "fn" && span.style.fg.is_some())),
+            "expected rg result code to be syntax highlighted by file extension: {lines:?}"
         );
     }
 

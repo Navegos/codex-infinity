@@ -1751,8 +1751,8 @@ fn session_header_directory_front_truncates_long_segment() {
 }
 
 #[test]
-fn coalesces_sequential_reads_within_one_call() {
-    // Build one exec cell with a Search followed by two Reads
+fn renders_command_labels_within_one_call() {
+    // Build one exec cell with a Search followed by two Reads.
     let call_id = "c1".to_string();
     let mut cell = ExecCell::new(
         ExecCall {
@@ -1783,7 +1783,7 @@ fn coalesces_sequential_reads_within_one_call() {
         },
         /*animations_enabled*/ true,
     );
-    // Mark call complete so markers are ✓
+    // Mark call complete so the group renders as explored.
     cell.complete_call(&call_id, CommandOutput::default(), Duration::from_millis(1));
 
     let lines = cell.display_lines(/*width*/ 80);
@@ -1792,7 +1792,7 @@ fn coalesces_sequential_reads_within_one_call() {
 }
 
 #[test]
-fn coalesces_reads_across_multiple_calls() {
+fn renders_command_labels_across_multiple_calls() {
     let mut cell = ExecCell::new(
         ExecCall {
             call_id: "c1".to_string(),
@@ -1810,7 +1810,7 @@ fn coalesces_reads_across_multiple_calls() {
         },
         /*animations_enabled*/ true,
     );
-    // Call 1: Search only
+    // Call 1: Search only.
     cell.complete_call("c1", CommandOutput::default(), Duration::from_millis(1));
     // Call 2: Read A
     assert!(cell.add_call(
@@ -1845,7 +1845,7 @@ fn coalesces_reads_across_multiple_calls() {
 }
 
 #[test]
-fn coalesced_reads_dedupe_names() {
+fn renders_duplicate_read_commands() {
     let mut cell = ExecCell::new(
         ExecCall {
             call_id: "c1".to_string(),
