@@ -1,9 +1,9 @@
 ---
-source: tui/src/chatwidget/tests.rs
+source: tui/src/chatwidget/tests/exec_flow.rs
 expression: active_blob(&chat)
 ---
 • Explored
   └ ls -la
     cat foo.txt
-    sed -n 100,200p foo.txt
+    sed -n '100,200p' foo.txt
     cat bar.txt
