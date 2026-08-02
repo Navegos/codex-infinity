@@ -22,8 +22,21 @@ const foundGroups = new Set();
 for (const [group, triples] of Object.entries(platformGroups)) {
   for (const triple of triples) {
     const binaryName = triple.includes('windows') ? 'codex.exe' : 'codex';
+    const codeModeHostName = triple.includes('windows')
+      ? 'codex-code-mode-host.exe'
+      : 'codex-code-mode-host';
     const binaryPath = join(vendorRoot, triple, 'codex', binaryName);
+    const codeModeHostPath = join(
+      vendorRoot,
+      triple,
+      'codex',
+      codeModeHostName,
+    );
     if (existsSync(binaryPath)) {
+      if (!existsSync(codeModeHostPath)) {
+        console.warn(`Missing code mode host for ${triple}`);
+        continue;
+      }
       console.log(`Found binary for ${triple}`);
       foundAny = true;
       foundGroups.add(group);

@@ -15,6 +15,17 @@ fn config_with_personality(personality: Option<Personality>) -> ModelsManagerCon
 }
 
 #[test]
+fn deepseek_v4_has_native_context_and_reasoning_metadata() {
+    for slug in ["deepseek-v4-flash", "deepseek-v4-pro"] {
+        let model = model_info_from_slug(slug);
+        assert_eq!(model.context_window, Some(1_000_000));
+        assert_eq!(model.max_context_window, Some(1_000_000));
+        assert_eq!(model.default_reasoning_level, Some(ReasoningEffort::High));
+        assert!(!model.used_fallback_model_metadata);
+    }
+}
+
+#[test]
 fn base_instruction_override_preserves_catalog_approval_messages() {
     let mut model = model_info_from_slug("unknown-model");
     let approvals = ApprovalMessages {

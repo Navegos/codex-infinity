@@ -3,15 +3,16 @@
 ## Codex Infinity local publish
 
 To publish a new `@codex-infinity/codex-infinity` package with the current Rust
-binary:
+binaries:
 
 ```bash
 cd codex-cli
 npm run deploy
 ```
 
-This builds `codex-rs`, copies `target/release/codex` into
-`codex-cli/vendor/x86_64-unknown-linux-gnu/codex/codex`, bumps the package patch
+This builds `codex-rs`, copies `target/release/codex` and
+`target/release/codex-code-mode-host` into
+`codex-cli/vendor/x86_64-unknown-linux-gnu/codex/`, bumps the package patch
 version, verifies the Linux x64 vendor payload, and runs `npm publish --access
 public`.
 

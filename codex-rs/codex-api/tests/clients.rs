@@ -8,6 +8,8 @@ use bytes::Bytes;
 use codex_api::ApiError;
 use codex_api::AuthError;
 use codex_api::AuthProvider;
+use codex_api::ChatClient;
+use codex_api::ChatRequest;
 use codex_api::Compression;
 use codex_api::Provider;
 use codex_api::ResponsesApiRequest;
@@ -303,6 +305,31 @@ async fn responses_client_uses_responses_path() -> Result<()> {
 
     let requests = state.take_stream_requests();
     assert_path_ends_with(&requests, "/responses");
+    Ok(())
+}
+
+#[tokio::test]
+async fn chat_client_uses_chat_completions_path_and_bearer_auth() -> Result<()> {
+    let state = RecordingState::default();
+    let transport = RecordingTransport::new(state.clone());
+    let client = ChatClient::new(
+        transport,
+        provider("DeepSeek"),
+        Arc::new(StaticAuth::new("deepseek-key", "unused")),
+    );
+    let _stream = client
+        .stream_request(ChatRequest {
+            body: serde_json::json!({"model": "deepseek-v4-flash", "stream": true}),
+            headers: HeaderMap::new(),
+        })
+        .await?;
+
+    let requests = state.take_stream_requests();
+    assert_path_ends_with(&requests, "/chat/completions");
+    assert_eq!(
+        requests[0].headers.get(http::header::AUTHORIZATION),
+        Some(&HeaderValue::from_static("Bearer deepseek-key"))
+    );
     Ok(())
 }
 

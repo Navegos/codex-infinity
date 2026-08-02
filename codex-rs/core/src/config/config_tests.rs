@@ -938,6 +938,27 @@ region = "us-west-2"
 }
 
 #[tokio::test]
+async fn deepseek_model_automatically_selects_native_provider() {
+    let config = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides {
+            model: Some("deepseek-v4-flash".into()),
+            ..Default::default()
+        },
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("load config");
+
+    assert_eq!(config.model.as_deref(), Some("deepseek-v4-flash"));
+    assert_eq!(config.model_provider_id, "deepseek");
+    assert_eq!(
+        config.model_provider.env_key.as_deref(),
+        Some("DEEPSEEK_API_KEY")
+    );
+}
+
+#[tokio::test]
 async fn load_config_applies_amazon_bedrock_transport_overrides() {
     let cfg = toml::from_str::<ConfigToml>(
         r#"

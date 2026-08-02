@@ -5,6 +5,7 @@ use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelInstructionsVariables;
 use codex_protocol::openai_models::ModelMessages;
 use codex_protocol::openai_models::ModelVisibility;
+use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::TruncationMode;
 use codex_protocol::openai_models::TruncationPolicyConfig;
 use codex_protocol::openai_models::WebSearchToolType;
@@ -124,12 +125,15 @@ fn clear_instruction_messages(model: &mut ModelInfo) {
 
 /// Build a minimal fallback model descriptor for missing/unknown slugs.
 pub fn model_info_from_slug(slug: &str) -> ModelInfo {
-    warn!("Unknown model {slug} is used. This will use fallback model metadata.");
-    ModelInfo {
+    let is_deepseek = matches!(slug, "deepseek-v4-flash" | "deepseek-v4-pro");
+    if !is_deepseek {
+        warn!("Unknown model {slug} is used. This will use fallback model metadata.");
+    }
+    let mut model = ModelInfo {
         slug: slug.to_string(),
         display_name: slug.to_string(),
         description: None,
-        default_reasoning_level: None,
+        default_reasoning_level: is_deepseek.then_some(ReasoningEffort::High),
         supported_reasoning_levels: Vec::new(),
         shell_type: ConfigShellToolType::Default,
         visibility: ModelVisibility::None,
@@ -152,20 +156,25 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
         truncation_policy: TruncationPolicyConfig::bytes(/*limit*/ 10_000),
         supports_parallel_tool_calls: false,
         supports_image_detail_original: false,
-        context_window: Some(272_000),
-        max_context_window: Some(272_000),
+        context_window: Some(if is_deepseek { 1_000_000 } else { 272_000 }),
+        max_context_window: Some(if is_deepseek { 1_000_000 } else { 272_000 }),
         auto_compact_token_limit: None,
         comp_hash: None,
         effective_context_window_percent: 95,
         experimental_supported_tools: Vec::new(),
         input_modalities: default_input_modalities(),
-        used_fallback_model_metadata: true, // this is the fallback model metadata
+        used_fallback_model_metadata: !is_deepseek,
         supports_search_tool: false,
         use_responses_lite: false,
         auto_review_model_override: None,
         tool_mode: None,
         multi_agent_version: None,
+    };
+    if is_deepseek {
+        model.description = Some("DeepSeek V4 native API model".into());
+        model.supports_parallel_tool_calls = true;
     }
+    model
 }
 
 fn local_personality_messages_for_slug(slug: &str) -> Option<ModelMessages> {

@@ -9,10 +9,13 @@ use codex_api::Provider;
 use codex_api::SharedAuthProvider;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
+use codex_model_provider_info::DEEPSEEK_FLASH_MODEL_ID;
+use codex_model_provider_info::DEEPSEEK_PRO_MODEL_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::manager::OpenAiModelsManager;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_models_manager::manager::StaticModelsManager;
+use codex_models_manager::model_info::model_info_from_slug;
 use codex_protocol::account::ProviderAccount;
 use codex_protocol::error::CodexErr;
 use codex_protocol::openai_models::ModelsResponse;
@@ -255,6 +258,19 @@ impl ConfiguredModelProvider {
             auth_manager,
         }
     }
+
+    fn deepseek_model_catalog(&self) -> Option<ModelsResponse> {
+        if !self.info.is_deepseek() {
+            return None;
+        }
+
+        Some(ModelsResponse {
+            models: [DEEPSEEK_FLASH_MODEL_ID, DEEPSEEK_PRO_MODEL_ID]
+                .into_iter()
+                .map(model_info_from_slug)
+                .collect(),
+        })
+    }
 }
 
 impl ModelProvider for ConfiguredModelProvider {
@@ -330,7 +346,7 @@ impl ModelProvider for ConfiguredModelProvider {
         codex_home: PathBuf,
         config_model_catalog: Option<ModelsResponse>,
     ) -> SharedModelsManager {
-        match config_model_catalog {
+        match config_model_catalog.or_else(|| self.deepseek_model_catalog()) {
             Some(model_catalog) => Arc::new(StaticModelsManager::new(
                 self.auth_manager.clone(),
                 model_catalog,
@@ -353,7 +369,7 @@ impl ModelProvider for ConfiguredModelProvider {
         &self,
         config_model_catalog: Option<ModelsResponse>,
     ) -> SharedModelsManager {
-        match config_model_catalog {
+        match config_model_catalog.or_else(|| self.deepseek_model_catalog()) {
             Some(model_catalog) => Arc::new(StaticModelsManager::new(
                 self.auth_manager.clone(),
                 model_catalog,
@@ -751,6 +767,33 @@ mod tests {
             .expect("Bedrock catalog should have a default model");
 
         assert_eq!(default_model.model, "openai.gpt-5.6-sol");
+    }
+
+    #[tokio::test]
+    async fn deepseek_provider_creates_static_models_manager() {
+        let provider = create_model_provider(
+            ModelProviderInfo::create_deepseek_provider(),
+            /*auth_manager*/ None,
+        );
+        let manager =
+            provider.models_manager(test_codex_home(), /*config_model_catalog*/ None);
+
+        let catalog = manager
+            .raw_model_catalog(
+                RefreshStrategy::Online,
+                HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+            )
+            .await;
+        let model_slugs = catalog
+            .models
+            .iter()
+            .map(|model| model.slug.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            model_slugs,
+            vec![DEEPSEEK_FLASH_MODEL_ID, DEEPSEEK_PRO_MODEL_ID]
+        );
     }
 
     #[tokio::test]
