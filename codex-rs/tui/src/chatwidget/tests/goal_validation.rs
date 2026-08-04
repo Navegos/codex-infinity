@@ -160,7 +160,7 @@ async fn goal_slash_command_emits_only_inserted_paste_text_element() {
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
     let paste = "x".repeat(1_001);
-    let placeholder = format!("[Pasted Content {} chars]", paste.chars().count());
+    let placeholder = crate::bottom_pane::large_paste_placeholder(&paste);
     chat.bottom_pane.set_composer_text(
         format!("/goal keep literal {placeholder} and "),
         Vec::new(),

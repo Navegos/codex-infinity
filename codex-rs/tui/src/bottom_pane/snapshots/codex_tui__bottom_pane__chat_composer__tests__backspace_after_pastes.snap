@@ -3,7 +3,7 @@ source: tui/src/bottom_pane/chat_composer.rs
 expression: terminal.backend()
 ---
 "                                                                                                    "
-"› [Pasted Content 1002 chars][Pasted Content 1004 chars]                                            "
+"› [Pasted Content 1002 chars, ~251 tokens][Pasted Content 1004 chars, ~251 tokens]                  "
 "                                                                                                    "
 "                                                                                                    "
 "                                                                                                    "

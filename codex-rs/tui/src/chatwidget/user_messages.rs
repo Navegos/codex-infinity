@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use crate::bottom_pane::LocalImageAttachment;
 use crate::bottom_pane::MentionBinding;
 use crate::bottom_pane::QueuedInputAction;
+use crate::bottom_pane::large_paste_placeholder;
 use codex_app_server_protocol::TextElement as AppServerTextElement;
 use codex_app_server_protocol::UserInput;
 use codex_protocol::config_types::CollaborationMode;
@@ -299,7 +300,7 @@ pub(super) fn remap_colliding_paste_placeholders(
             continue;
         }
 
-        let base = format!("[Pasted Content {} chars]", text.chars().count());
+        let base = large_paste_placeholder(text);
         let mut suffix = 2;
         let replacement = loop {
             let candidate = format!("{base} #{suffix}");

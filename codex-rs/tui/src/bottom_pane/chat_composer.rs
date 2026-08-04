@@ -100,9 +100,10 @@
 //! # Large Paste Placeholders
 //!
 //! Large pastes insert an element placeholder in the buffer and store the full text in
-//! `pending_pastes`. The placeholder label is derived from the pasted character count:
+//! `pending_pastes`. The placeholder label includes the pasted character count and an estimated
+//! token count:
 //!
-//! - First paste of a given size uses `[Pasted Content N chars]`.
+//! - First paste of a given size uses `[Pasted Content N chars, ~M tokens]`.
 //! - Additional pending pastes of the same size add a numeric suffix (`#2`, `#3`, ...), where the
 //!   next suffix is computed from the placeholders that still exist in `pending_pastes`.
 //! - When all placeholders for a size are cleared or deleted, the next paste of that size reuses
@@ -318,6 +319,12 @@ use ratatui::style::Color;
 /// If the pasted content exceeds this number of characters, replace it with a
 /// placeholder in the UI.
 const LARGE_PASTE_CHAR_THRESHOLD: usize = 1000;
+
+pub(crate) fn large_paste_placeholder(pasted: &str) -> String {
+    let char_count = pasted.chars().count();
+    let token_count = codex_utils_string::approx_token_count(pasted);
+    format!("[Pasted Content {char_count} chars, ~{token_count} tokens]")
+}
 
 fn user_input_too_large_message(actual_chars: usize) -> String {
     format!(
@@ -1129,7 +1136,7 @@ impl ChatComposer {
         let pasted = sanitize_user_text(&pasted);
         let char_count = pasted.chars().count();
         if char_count > LARGE_PASTE_CHAR_THRESHOLD {
-            let placeholder = self.next_large_paste_placeholder(char_count);
+            let placeholder = self.next_large_paste_placeholder(&pasted);
             self.draft.textarea.insert_element(&placeholder);
             self.draft.pending_pastes.push((placeholder, pasted));
         } else if char_count > 1
@@ -1853,8 +1860,8 @@ impl ChatComposer {
             .is_some_and(|expires_at| Instant::now() < expires_at)
     }
 
-    fn next_large_paste_placeholder(&self, char_count: usize) -> String {
-        let base = format!("[Pasted Content {char_count} chars]");
+    fn next_large_paste_placeholder(&self, pasted: &str) -> String {
+        let base = large_paste_placeholder(pasted);
         let prefix = format!("{base} #");
         let mut max_suffix = 0usize;
 
@@ -6127,8 +6134,7 @@ mod tests {
 
         let large = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 5);
         composer.handle_paste(large.clone());
-        let char_count = large.chars().count();
-        let placeholder = format!("[Pasted Content {char_count} chars]");
+        let placeholder = large_paste_placeholder(&large);
         assert_eq!(composer.draft.textarea.text(), placeholder);
         assert_eq!(
             composer.draft.pending_pastes,
@@ -6194,7 +6200,7 @@ mod tests {
         );
 
         let paste = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 4);
-        let base = format!("[Pasted Content {} chars]", paste.chars().count());
+        let base = large_paste_placeholder(&paste);
 
         composer.handle_paste(paste.clone());
         assert_eq!(composer.draft.textarea.text(), base);
@@ -8748,7 +8754,7 @@ mod tests {
         let large = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 10);
         let needs_redraw = composer.handle_paste(large.clone());
         assert!(needs_redraw);
-        let placeholder = format!("[Pasted Content {} chars]", large.chars().count());
+        let placeholder = large_paste_placeholder(&large);
         assert_eq!(composer.draft.textarea.text(), placeholder);
         assert_eq!(composer.draft.pending_pastes.len(), 1);
         assert_eq!(composer.draft.pending_pastes[0].0, placeholder);
@@ -10214,7 +10220,7 @@ mod tests {
         );
 
         let large = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 5);
-        let placeholder = format!("[Pasted Content {} chars]", large.chars().count());
+        let placeholder = large_paste_placeholder(&large);
 
         composer.handle_paste(large.clone());
         composer.insert_str(" @ma");
@@ -10492,7 +10498,7 @@ mod tests {
             .map(|(content, is_large)| {
                 composer.handle_paste(content.clone());
                 if *is_large {
-                    let placeholder = format!("[Pasted Content {} chars]", content.chars().count());
+                    let placeholder = large_paste_placeholder(content);
                     expected_text.push_str(&placeholder);
                     expected_pending_count += 1;
                 } else {
@@ -10506,22 +10512,16 @@ mod tests {
         assert_eq!(
             states,
             vec![
+                (large_paste_placeholder(&test_cases[0].0), 1),
                 (
-                    format!("[Pasted Content {} chars]", test_cases[0].0.chars().count()),
+                    format!("{} and ", large_paste_placeholder(&test_cases[0].0)),
                     1
                 ),
                 (
                     format!(
-                        "[Pasted Content {} chars] and ",
-                        test_cases[0].0.chars().count()
-                    ),
-                    1
-                ),
-                (
-                    format!(
-                        "[Pasted Content {} chars] and [Pasted Content {} chars]",
-                        test_cases[0].0.chars().count(),
-                        test_cases[2].0.chars().count()
+                        "{} and {}",
+                        large_paste_placeholder(&test_cases[0].0),
+                        large_paste_placeholder(&test_cases[2].0)
                     ),
                     2
                 ),
@@ -10568,7 +10568,7 @@ mod tests {
             .map(|(content, is_large)| {
                 composer.handle_paste(content.clone());
                 if *is_large {
-                    let placeholder = format!("[Pasted Content {} chars]", content.chars().count());
+                    let placeholder = large_paste_placeholder(content);
                     current_pos += placeholder.len();
                 } else {
                     current_pos += content.len();
@@ -10607,7 +10607,10 @@ mod tests {
         assert_eq!(
             deletion_states,
             vec![
-                (" and [Pasted Content 1006 chars]".to_string(), 1),
+                (
+                    " and [Pasted Content 1006 chars, ~252 tokens]".to_string(),
+                    1
+                ),
                 (" and ".to_string(), 0),
             ]
         );
@@ -10632,7 +10635,7 @@ mod tests {
         );
 
         let paste = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 4);
-        let placeholder_base = format!("[Pasted Content {} chars]", paste.chars().count());
+        let placeholder_base = large_paste_placeholder(&paste);
         let placeholder_second = format!("{placeholder_base} #2");
 
         composer.handle_paste(paste.clone());
@@ -10674,7 +10677,7 @@ mod tests {
         );
 
         let paste = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 4);
-        let base = format!("[Pasted Content {} chars]", paste.chars().count());
+        let base = large_paste_placeholder(&paste);
         let second = format!("{base} #2");
         let third = format!("{base} #3");
 
@@ -10719,7 +10722,7 @@ mod tests {
         );
 
         let paste = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 4);
-        let base = format!("[Pasted Content {} chars]", paste.chars().count());
+        let base = large_paste_placeholder(&paste);
 
         composer.handle_paste(paste.clone());
         assert_eq!(composer.draft.textarea.text(), base);
@@ -10762,7 +10765,7 @@ mod tests {
         ];
 
         let paste = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 4);
-        let placeholder = format!("[Pasted Content {} chars]", paste.chars().count());
+        let placeholder = large_paste_placeholder(&paste);
 
         let states: Vec<_> = test_cases
             .into_iter()
@@ -11971,7 +11974,7 @@ mod tests {
         let flushed = composer.handle_paste_burst_flush(flush_time);
         assert!(flushed, "expected flush after stopping fast input");
 
-        let expected_placeholder = format!("[Pasted Content {count} chars]");
+        let expected_placeholder = large_paste_placeholder(&"x".repeat(count));
         assert_eq!(composer.draft.textarea.text(), expected_placeholder);
         assert_eq!(composer.draft.pending_pastes.len(), 1);
         assert_eq!(composer.draft.pending_pastes[0].0, expected_placeholder);
@@ -12363,7 +12366,7 @@ mod tests {
 
         let first_paste = "a".repeat(LARGE_PASTE_CHAR_THRESHOLD + 4);
         let second_paste = "b".repeat(LARGE_PASTE_CHAR_THRESHOLD + 4);
-        let base = format!("[Pasted Content {} chars]", first_paste.chars().count());
+        let base = large_paste_placeholder(&first_paste);
         let second = format!("{base} #2");
 
         composer.handle_paste(first_paste.clone());
