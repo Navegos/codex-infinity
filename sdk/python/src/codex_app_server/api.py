@@ -4,8 +4,6 @@ import asyncio
 from dataclasses import dataclass
 from typing import AsyncIterator, Iterator
 
-from .async_client import AsyncAppServerClient
-from .client import AppServerClient, AppServerConfig
 from .generated.v2_all import (
     ApprovalsReviewer,
     AskForApproval,
@@ -31,7 +29,6 @@ from .generated.v2_all import (
     ThreadSourceKind,
     ThreadStartSource,
     ThreadStartParams,
-    Turn as AppServerTurn,
     TurnCompletedNotification,
     TurnInterruptResponse,
     TurnStartParams,
@@ -39,21 +36,9 @@ from .generated.v2_all import (
 )
 from .models import InitializeResponse, JsonObject, Notification, ServerInfo
 from ._inputs import (
-    ImageInput,
-    Input,
-    InputItem,
-    LocalImageInput,
-    MentionInput,
     RunInput,
-    SkillInput,
-    TextInput,
     _normalize_run_input,
     _to_wire_input,
-)
-from ._run import (
-    RunResult,
-    _collect_async_run_result,
-    _collect_run_result,
 )
 
 
@@ -71,7 +56,7 @@ def _split_user_agent(user_agent: str) -> tuple[str | None, str | None]:
 
 
 class Codex:
-    """Minimal typed SDK surface for app-server v2."""
+    """Minimal typed SDK surface for app-server v2.
 
     The client starts its runtime connection during construction. Use it as a
     context manager so resources are closed promptly.
@@ -319,6 +304,7 @@ class Codex:
         """Restore an archived conversation thread."""
         unarchived = self._client.thread_unarchive(thread_id)
         return Thread(self._client, unarchived.thread.id)
+
     # END GENERATED: Codex.flat_methods
 
     def models(self, *, include_hidden: bool = False) -> ModelListResponse:
@@ -403,7 +389,9 @@ class AsyncCodex:
     async def account(self, *, refresh_token: bool = False) -> GetAccountResponse:
         """Read the current Codex account state."""
         await self._ensure_initialized()
-        return await self._client.account_read(GetAccountParams(refresh_token=refresh_token))
+        return await self._client.account_read(
+            GetAccountParams(refresh_token=refresh_token)
+        )
 
     async def logout(self) -> None:
         """Clear the current Codex account session."""
@@ -570,6 +558,7 @@ class AsyncCodex:
         await self._ensure_initialized()
         unarchived = await self._client.thread_unarchive(thread_id)
         return AsyncThread(self, unarchived.thread.id)
+
     # END GENERATED: AsyncCodex.flat_methods
 
     async def models(self, *, include_hidden: bool = False) -> ModelListResponse:
@@ -656,6 +645,7 @@ class Thread:
         )
         turn = self._client.turn_start(self.id, wire_input, params=params)
         return TurnHandle(self._client, self.id, turn.turn.id)
+
     # END GENERATED: Thread.flat_methods
 
     def read(self, *, include_turns: bool = False) -> ThreadReadResponse:
@@ -754,6 +744,7 @@ class AsyncThread:
             params=params,
         )
         return AsyncTurnHandle(self._codex, self.id, turn.turn.id)
+
     # END GENERATED: AsyncThread.flat_methods
 
     async def read(self, *, include_turns: bool = False) -> ThreadReadResponse:

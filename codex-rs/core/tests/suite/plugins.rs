@@ -6,7 +6,10 @@ use std::time::Duration;
 use std::time::Instant;
 
 use anyhow::Result;
+use codex_core::config::Config;
 use codex_core_plugins::store::PluginStore;
+use codex_extension_api::ExtensionRegistry;
+use codex_extension_api::ExtensionRegistryBuilder;
 use codex_features::Feature;
 use codex_login::CodexAuth;
 use codex_mcp::CODEX_APPS_MCP_SERVER_NAME;
@@ -19,6 +22,8 @@ use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::user_input::UserInput;
+use codex_skills_extension::SkillsExtensionConfig;
+use codex_skills_extension::install;
 use core_test_support::apps_test_server::AppsTestServer;
 use core_test_support::apps_test_server::SEARCH_CALENDAR_CREATE_TOOL;
 use core_test_support::responses::ResponseMock;
@@ -58,6 +63,17 @@ const SAMPLE_PLUGIN_MCP_NAMESPACE: &str = "mcp__sample";
 const PLUGIN_APP_SEARCH_CALL_ID: &str = "plugin-app-search";
 const PLUGIN_MCP_SEARCH_CALL_ID: &str = "plugin-mcp-search";
 const REMOTE_PLUGIN_CONFIG_NAME: &str = "sample@openai-curated-remote";
+
+fn skills_extensions() -> Arc<ExtensionRegistry<Config>> {
+    let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+    install(&mut extensions, |config: &Config| SkillsExtensionConfig {
+        include_instructions: config.include_skill_instructions,
+        bundled_skills_enabled: config.bundled_skills_enabled(),
+        orchestrator_skills_enabled: config.orchestrator_skills_enabled,
+        shadow_selection_enabled: config.features.enabled(Feature::SkillSearch),
+    });
+    Arc::new(extensions.build())
+}
 
 fn sample_plugin_root(home: &TempDir) -> std::path::PathBuf {
     home.path().join("plugins/cache/test/sample/local")
@@ -408,12 +424,18 @@ async fn capability_sections_render_in_developer_message_in_order() -> Result<()
     let codex_home = Arc::new(TempDir::new()?);
     write_plugin_skill_plugin(codex_home.as_ref());
     write_plugin_app_plugin(codex_home.as_ref());
-    let test_codex = build_apps_enabled_plugin_test_codex(
-        &server,
-        Arc::clone(&codex_home),
-        apps_server.chatgpt_base_url,
-    )
-    .await?;
+    let mut builder = test_codex()
+        .with_home(Arc::clone(&codex_home))
+        .with_extensions(skills_extensions())
+        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_config(move |config| {
+            config
+                .features
+                .enable(Feature::Apps)
+                .expect("test config should allow feature update");
+            config.chatgpt_base_url = apps_server.chatgpt_base_url;
+        });
+    let test_codex = builder.build(&server).await?;
     let codex = Arc::clone(&test_codex.codex);
 
     codex
@@ -645,6 +667,7 @@ enabled = true
 
         let mut builder = test_codex()
             .with_home(Arc::clone(&codex_home))
+            .with_extensions(skills_extensions())
             .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
         let test_codex = builder.build_with_auto_env(&server).await?;
         let plugins_manager = test_codex.thread_manager.plugins_manager();
@@ -717,8 +740,12 @@ enabled = true
     Ok(())
 }
 
+#[test_case(true; "enabled app")]
+#[test_case(false; "disabled app")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn explicit_plugin_mentions_use_apps_for_chatgpt_dual_surface_plugins() -> Result<()> {
+async fn explicit_plugin_mentions_use_apps_for_chatgpt_dual_surface_plugins(
+    app_enabled: bool,
+) -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
     let apps_server = AppsTestServer::mount_with_connector_name(&server, "Google Calendar").await?;
@@ -735,6 +762,12 @@ async fn explicit_plugin_mentions_use_apps_for_chatgpt_dual_surface_plugins() ->
     write_plugin_skill_plugin(codex_home.as_ref());
     write_plugin_mcp_plugin(codex_home.as_ref(), &rmcp_test_server_bin);
     write_plugin_app_plugin(codex_home.as_ref());
+    let config_path = codex_home.path().join("config.toml");
+    let config = std::fs::read_to_string(&config_path)?;
+    std::fs::write(
+        config_path,
+        format!("{config}\n[apps.calendar]\nenabled = {app_enabled}\n"),
+    )?;
 
     let test_codex =
         build_apps_enabled_plugin_test_codex(&server, codex_home, apps_server.chatgpt_base_url)
@@ -771,11 +804,12 @@ async fn explicit_plugin_mentions_use_apps_for_chatgpt_dual_surface_plugins() ->
             .any(|text| text.contains("MCP servers from this plugin")),
         "expected plugin MCP guidance to be suppressed for ChatGPT auth: {developer_messages:?}"
     );
-    assert!(
+    assert_eq!(
         developer_messages
             .iter()
             .any(|text| text.contains("Apps from this plugin")),
-        "expected visible plugin app guidance: {developer_messages:?}"
+        app_enabled,
+        "plugin app guidance should match app enablement: {developer_messages:?}"
     );
     assert!(
         request
@@ -784,8 +818,14 @@ async fn explicit_plugin_mentions_use_apps_for_chatgpt_dual_surface_plugins() ->
         "plugin MCP tool should not leak into the request for ChatGPT auth"
     );
     let (calendar_tool, echo_tool) = searched_plugin_tools(&requests[1]);
-    let calendar_tool = calendar_tool.expect("plugin app tool should be searchable");
-    assert_plugin_provenance(&calendar_tool);
+    assert_eq!(
+        calendar_tool.is_some(),
+        app_enabled,
+        "plugin app tool search should match app enablement"
+    );
+    if let Some(calendar_tool) = calendar_tool {
+        assert_plugin_provenance(&calendar_tool);
+    }
     assert!(
         echo_tool.is_none(),
         "plugin MCP tool should be suppressed for ChatGPT auth"

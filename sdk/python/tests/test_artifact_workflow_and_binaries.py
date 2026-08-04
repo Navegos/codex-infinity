@@ -740,7 +740,9 @@ def test_normalize_codex_version_accepts_release_tags_and_pep440_versions() -> N
     script = _load_update_script_module()
 
     assert script.normalize_codex_version("rust-v0.116.0-alpha.1") == "0.116.0a1"
-    assert script.normalize_codex_version("rust-v0.116.0-alpha.1.2") == "0.116.0a1.post2"
+    assert (
+        script.normalize_codex_version("rust-v0.116.0-alpha.1.2") == "0.116.0a1.post2"
+    )
     assert script.normalize_codex_version("v0.116.0-beta.2") == "0.116.0b2"
     assert script.normalize_codex_version("0.116.0rc3") == "0.116.0rc3"
     assert script.normalize_codex_version("0.116.0") == "0.116.0"
@@ -784,7 +786,9 @@ def test_release_version_cli_writes_python_runtime_outputs(tmp_path: Path) -> No
         "returncode": 0,
         "stdout": "",
         "stderr": "",
-        "github_output": ("python_version=0.116.0a1.post2\nrelease_tag=rust-v0.116.0-alpha.1.2\n"),
+        "github_output": (
+            "python_version=0.116.0a1.post2\nrelease_tag=rust-v0.116.0-alpha.1.2\n"
+        ),
     }
 
 

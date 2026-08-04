@@ -674,7 +674,9 @@ def _preserve_reasoning_effort_enum(out_path: Path) -> None:
 
     class_source = source[class_start:class_end]
     if "min_length=1" not in class_source:
-        raise RuntimeError("Generated ReasoningEffort did not preserve the non-empty constraint")
+        raise RuntimeError(
+            "Generated ReasoningEffort did not preserve the non-empty constraint"
+        )
     open_enum = """class ReasoningEffort(str, Enum):
     none = "none"
     minimal = "minimal"

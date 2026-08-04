@@ -14,6 +14,7 @@ use codex_config::types::OAuthCredentialsStoreMode;
 use codex_connectors::ConnectorRuntimeContextKey;
 use codex_exec_server::Environment;
 use codex_login::CodexAuth;
+use codex_protocol::mcp::ClientMcpExtensions;
 use codex_rmcp_client::StoredOAuthTokens;
 use codex_rmcp_client::stored_oauth_credentials;
 use rmcp::model::ElicitationCapability;
@@ -90,7 +91,7 @@ pub(crate) struct McpServerConnectionIdentity {
     runtime_auth_token: Option<String>,
     codex_apps_cache_identity: Option<(PathBuf, ConnectorRuntimeContextKey)>,
     client_elicitation_capability: ElicitationCapability,
-    supports_openai_form_elicitation: bool,
+    client_mcp_extensions: ClientMcpExtensions,
 }
 
 impl McpServerConnectionIdentity {
@@ -106,7 +107,7 @@ impl McpServerConnectionIdentity {
         auth: Option<&CodexAuth>,
         codex_apps_cache_identity: Option<(PathBuf, ConnectorRuntimeContextKey)>,
         client_elicitation_capability: ElicitationCapability,
-        supports_openai_form_elicitation: bool,
+        client_mcp_extensions: ClientMcpExtensions,
     ) -> Self {
         let config = server.config();
         let stored_oauth_url = if runtime_auth_provider.is_none()
@@ -128,12 +129,16 @@ impl McpServerConnectionIdentity {
             None
         };
         let oauth_credentials = stored_oauth_url.map_or(Ok(None), |url| {
-            stored_oauth_credentials(server_name, url, store_mode, keyring_backend_kind).map_err(
-                |error| {
-                    warn!(server_name, %error, "failed to read stored MCP OAuth credentials");
-                    error.to_string()
-                },
+            stored_oauth_credentials(
+                config.oauth_credential_name(server_name).as_ref(),
+                url,
+                store_mode,
+                keyring_backend_kind,
             )
+            .map_err(|error| {
+                warn!(server_name, %error, "failed to read stored MCP OAuth credentials");
+                error.to_string()
+            })
         });
         let local_stdio_fallback_cwd = (config.is_local_environment()
             && matches!(
@@ -159,7 +164,7 @@ impl McpServerConnectionIdentity {
             runtime_auth_token,
             codex_apps_cache_identity,
             client_elicitation_capability,
-            supports_openai_form_elicitation,
+            client_mcp_extensions,
         }
     }
 
@@ -187,7 +192,7 @@ impl McpServerConnectionIdentity {
             && self.runtime_auth_token == other.runtime_auth_token
             && self.codex_apps_cache_identity == other.codex_apps_cache_identity
             && self.client_elicitation_capability == other.client_elicitation_capability
-            && self.supports_openai_form_elicitation == other.supports_openai_form_elicitation
+            && self.client_mcp_extensions == other.client_mcp_extensions
     }
 
     pub(crate) fn oauth_credentials(&self) -> Result<&Option<StoredOAuthTokens>, &String> {

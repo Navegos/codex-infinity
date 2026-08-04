@@ -8,6 +8,10 @@ use codex_utils_cli::SharedCliOptions;
 #[derive(Parser, Clone, Debug)]
 #[command(version)]
 pub struct Cli {
+    /// Process-only PSP routing selected by the parent Codex CLI.
+    #[clap(skip)]
+    pub psp: bool,
+
     /// Optional user prompt to start the session.
     #[arg(value_name = "PROMPT", value_hint = clap::ValueHint::Other)]
     pub prompt: Option<String>,
@@ -156,4 +160,5 @@ fn mark_tui_args(cmd: clap::Command) -> clap::Command {
     .mut_arg("yolo2", |arg| arg.conflicts_with("approval_policy"))
     .mut_arg("yolo3", |arg| arg.conflicts_with("approval_policy"))
     .mut_arg("yolo4", |arg| arg.conflicts_with("approval_policy"))
+    .mut_arg("auto_review", |arg| arg.conflicts_with("approval_policy"))
 }

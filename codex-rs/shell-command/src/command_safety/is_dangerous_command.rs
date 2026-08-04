@@ -67,7 +67,6 @@ pub fn dangerous_powershell_words_match(command: &[String]) -> Option<DangerousC
     }
 }
 
-
 fn is_git_global_option_with_value(arg: &str) -> bool {
     matches!(
         arg,

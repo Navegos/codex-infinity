@@ -18,9 +18,9 @@ use crate::wrapping::adaptive_wrap_lines;
 use codex_ansi_escape::ansi_escape_line;
 use codex_app_server_protocol::CommandExecutionSource as ExecCommandSource;
 use codex_protocol::parse_command::ParsedCommand;
-use itertools::Itertools;
 use codex_shell_command::bash::extract_bash_command;
 use codex_utils_elapsed::format_duration;
+use itertools::Itertools;
 use ratatui::prelude::*;
 use ratatui::style::Modifier;
 use ratatui::style::Stylize;
@@ -324,7 +324,11 @@ impl HistoryCell for ExecCell {
                     let wrap_width = width.max(1) as usize;
                     let wrap_opts = RtOptions::new(wrap_width);
                     for unwrapped in output.transcript_lines().map(|line| {
-                        highlighted_output_line_for_call(call, fallback_lang.as_deref(), line.as_ref())
+                        highlighted_output_line_for_call(
+                            call,
+                            fallback_lang.as_deref(),
+                            line.as_ref(),
+                        )
                     }) {
                         let wrapped = adaptive_wrap_line(&unwrapped, wrap_opts.clone());
                         push_owned_lines(&wrapped, &mut lines);
