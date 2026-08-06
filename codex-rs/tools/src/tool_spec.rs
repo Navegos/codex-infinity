@@ -89,6 +89,25 @@ pub fn create_tools_json_for_responses_api(
     Ok(tools_json)
 }
 
+/// Returns function tools in the OpenAI-compatible Chat Completions shape.
+/// Tools that have no Chat Completions equivalent are omitted.
+pub fn create_tools_json_for_chat_completions_api(
+    tools: &[ToolSpec],
+) -> Result<Vec<Value>, serde_json::Error> {
+    create_tools_json_for_responses_api(tools).map(|tools| {
+        tools
+            .into_iter()
+            .filter_map(|mut tool| {
+                if tool.get("type").and_then(Value::as_str) != Some("function") {
+                    return None;
+                }
+                tool.as_object_mut()?.remove("type");
+                Some(serde_json::json!({"type": "function", "function": tool}))
+            })
+            .collect()
+    })
+}
+
 /// Returns raw JSON that can be embedded directly in a Responses API request.
 pub fn create_tools_raw_json_for_responses_api(
     tools: &[ToolSpec],

@@ -33,6 +33,8 @@ use std::sync::atomic::Ordering;
 use codex_api::AgentIdentityTelemetry;
 use codex_api::ApiError;
 use codex_api::AuthProvider;
+use codex_api::ChatClient as ApiChatClient;
+use codex_api::ChatRequestBuilder;
 use codex_api::CompactClient as ApiCompactClient;
 use codex_api::CompactionInput as ApiCompactionInput;
 use codex_api::Compression;
@@ -88,6 +90,7 @@ use codex_protocol::protocol::W3cTraceContext;
 use codex_rollout_trace::CompactionTraceContext;
 use codex_rollout_trace::InferenceTraceAttempt;
 use codex_rollout_trace::InferenceTraceContext;
+use codex_tools::create_tools_json_for_chat_completions_api;
 use codex_tools::create_tools_json_for_responses_api;
 use codex_tools::create_tools_raw_json_for_responses_api;
 use eventsource_stream::Event;
@@ -157,6 +160,7 @@ const X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER: &str =
     "x-openai-internal-codex-responses-lite";
 const REALTIME_CALLS_ENDPOINT: &str = "/realtime/calls";
 const RESPONSES_ENDPOINT: &str = "/responses";
+const CHAT_COMPLETIONS_ENDPOINT: &str = "/chat/completions";
 const RESPONSES_COMPACT_ENDPOINT: &str = "/responses/compact";
 // `/responses/compact` is unary, so the timeout covers the full response rather than one idle
 // period between stream events.
@@ -1510,6 +1514,81 @@ impl ModelClientSession {
         }
     }
 
+    async fn stream_chat_completions(
+        &self,
+        prompt: &Prompt,
+        model_info: &ModelInfo,
+        session_telemetry: &SessionTelemetry,
+        effort: Option<ReasoningEffortConfig>,
+        inference_trace: &InferenceTraceContext,
+    ) -> Result<ResponseStream> {
+        if prompt.output_schema.is_some() {
+            return Err(CodexErr::UnsupportedOperation(
+                "output_schema is not supported by Chat Completions providers".into(),
+            ));
+        }
+        let client_setup = self.client.current_client_setup().await?;
+        let transport = self
+            .client
+            .build_api_transport(&client_setup.api_provider, CHAT_COMPLETIONS_ENDPOINT)?;
+        let request_auth_context = AuthRequestTelemetryContext::new(
+            client_setup.auth.as_ref().map(CodexAuth::auth_mode),
+            client_setup.api_auth.as_ref(),
+            client_setup.agent_identity_telemetry.clone(),
+            PendingUnauthorizedRetry::default(),
+        );
+        let (request_telemetry, sse_telemetry) = Self::build_streaming_telemetry(
+            session_telemetry,
+            request_auth_context,
+            RequestRouteTelemetry::for_endpoint(CHAT_COMPLETIONS_ENDPOINT),
+            self.client.state.auth_env_telemetry.clone(),
+        );
+        let tools = create_tools_json_for_chat_completions_api(&prompt.tools)?;
+        let requested_effort = effort.or_else(|| model_info.default_reasoning_level.clone());
+        let deepseek_effort = requested_effort.as_ref().map(|effort| match effort {
+            ReasoningEffortConfig::Max
+            | ReasoningEffortConfig::XHigh
+            | ReasoningEffortConfig::Ultra => "max",
+            _ => "high",
+        });
+        let request = ChatRequestBuilder::new(
+            &model_info.slug,
+            &prompt.base_instructions.text,
+            &prompt.input,
+            &tools,
+        )
+        .session_id(Some(self.client.state.thread_id.to_string()))
+        .reasoning(deepseek_effort, true)
+        .build(&client_setup.api_provider)
+        .map_err(|error| self.client.state.provider.map_api_error(error))?;
+        let inference_trace_attempt = inference_trace.start_attempt();
+        inference_trace_attempt.record_started(&request.body);
+        let client =
+            ApiChatClient::new(transport, client_setup.api_provider, client_setup.api_auth)
+                .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
+        match client.stream_request(request).await {
+            Ok(stream) => {
+                let (stream, _) = map_response_stream(
+                    stream,
+                    session_telemetry.clone(),
+                    inference_trace_attempt,
+                    Arc::clone(&self.client.state.provider),
+                );
+                Ok(stream)
+            }
+            Err(error) => {
+                inference_trace_attempt.record_failed(
+                    &error,
+                    extract_response_debug_context_from_api_error(&error)
+                        .request_id
+                        .as_deref(),
+                    &[],
+                );
+                Err(self.client.state.provider.map_api_error(error))
+            }
+        }
+    }
+
     /// Streams a turn via the Responses API over WebSocket transport.
     #[allow(clippy::too_many_arguments)]
     #[instrument(
@@ -1843,6 +1922,16 @@ impl ModelClientSession {
                     summary,
                     service_tier,
                     responses_metadata,
+                    inference_trace,
+                )
+                .await
+            }
+            WireApi::Chat => {
+                self.stream_chat_completions(
+                    prompt,
+                    model_info,
+                    session_telemetry,
+                    effort,
                     inference_trace,
                 )
                 .await

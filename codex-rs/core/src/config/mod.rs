@@ -82,7 +82,12 @@ use codex_mcp::McpProtocolMode;
 use codex_mcp::McpServerRegistration;
 use codex_mcp::ResolvedMcpCatalog;
 use codex_memories_read::memory_root;
+<<<<<<< HEAD
 use codex_model_provider::ProviderCapabilities;
+||||||| 0754a16287
+=======
+use codex_model_provider_info::DEEPSEEK_PROVIDER_ID;
+>>>>>>> @{-1}
 use codex_model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
@@ -3692,9 +3697,19 @@ impl Config {
             merge_configured_model_providers(built_in_model_providers(openai_base_url), cfg.model_providers)
                 .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message))?;
 
-        let model_provider_id = model_provider
-            .or(cfg.model_provider)
-            .unwrap_or_else(|| "openai".to_string());
+        let inferred_deepseek_provider = model_provider.is_none()
+            && cfg.model_provider.is_none()
+            && model
+                .as_deref()
+                .or(cfg.model.as_deref())
+                .is_some_and(|model| matches!(model, "deepseek-v4-flash" | "deepseek-v4-pro"));
+        let model_provider_id = model_provider.or(cfg.model_provider).unwrap_or_else(|| {
+            if inferred_deepseek_provider {
+                DEEPSEEK_PROVIDER_ID.to_string()
+            } else {
+                "openai".to_string()
+            }
+        });
         let model_provider = model_providers
             .get(&model_provider_id)
             .ok_or_else(|| {

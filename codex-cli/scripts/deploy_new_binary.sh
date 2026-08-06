@@ -5,8 +5,9 @@ usage() {
   cat <<'EOF'
 Usage: scripts/deploy_new_binary.sh [--dry-run] [--bump] [--no-bump] [--tag <tag>]
 
-Builds the Rust CLI, installs the new Linux x64 binary into vendor/, verifies
-the npm package payload, and publishes @codex-infinity/codex-infinity.
+Builds the Rust CLI and code-mode host, installs the new Linux x64 binaries
+into vendor/, verifies the npm package payload, and publishes
+@codex-infinity/codex-infinity.
 
 By default the script bumps the package patch version before publishing because
 npm package versions are immutable. Dry-runs restore package.json after the
@@ -62,6 +63,7 @@ codex_cli_root="$(cd "$script_dir/.." && pwd)"
 repo_root="$(cd "$codex_cli_root/.." && pwd)"
 codex_rs_root="$repo_root/codex-rs"
 binary_dest="$codex_cli_root/vendor/x86_64-unknown-linux-gnu/codex/codex"
+code_mode_host_dest="$codex_cli_root/vendor/x86_64-unknown-linux-gnu/codex/codex-code-mode-host"
 
 if ! command -v "${CC:-cc}" >/dev/null 2>&1; then
   if command -v gcc >/dev/null 2>&1; then
@@ -81,12 +83,14 @@ if ((!dry_run)); then
 fi
 
 cd "$codex_rs_root"
-cargo build --release -p codex-cli
+cargo build --release -p codex-cli -p codex-code-mode-host
 target_dir="$(cargo metadata --format-version 1 --no-deps | python3 -c "import json, sys; print(json.load(sys.stdin)['target_directory'])")"
 binary_src="$target_dir/release/codex"
+code_mode_host_src="$target_dir/release/codex-code-mode-host"
 
 mkdir -p "$(dirname "$binary_dest")"
 install -m 755 "$binary_src" "$binary_dest"
+install -m 755 "$code_mode_host_src" "$code_mode_host_dest"
 
 cd "$codex_cli_root"
 

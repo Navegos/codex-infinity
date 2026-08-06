@@ -111,7 +111,7 @@ supports_standalone_web_search = true
 }
 
 #[test]
-fn test_deserialize_chat_wire_api_shows_helpful_error() {
+fn test_deserialize_chat_wire_api() {
     let provider_toml = r#"
 name = "OpenAI using Chat Completions"
 base_url = "https://api.openai.com/v1"
@@ -119,8 +119,20 @@ env_key = "OPENAI_API_KEY"
 wire_api = "chat"
         "#;
 
-    let err = toml::from_str::<ModelProviderInfo>(provider_toml).unwrap_err();
-    assert!(err.to_string().contains(CHAT_WIRE_API_REMOVED_ERROR));
+    let provider = toml::from_str::<ModelProviderInfo>(provider_toml).unwrap();
+    assert_eq!(provider.wire_api, WireApi::Chat);
+}
+
+#[test]
+fn deepseek_is_built_in_with_native_auth_and_chat_transport() {
+    let providers = built_in_model_providers(None);
+    let provider = providers
+        .get(DEEPSEEK_PROVIDER_ID)
+        .expect("deepseek provider");
+    assert_eq!(provider.name, "DeepSeek");
+    assert_eq!(provider.base_url.as_deref(), Some(DEEPSEEK_BASE_URL));
+    assert_eq!(provider.env_key.as_deref(), Some("DEEPSEEK_API_KEY"));
+    assert_eq!(provider.wire_api, WireApi::Chat);
 }
 
 #[test]

@@ -70,6 +70,21 @@ When Codex knows which client started the turn, the legacy notify JSON payload a
 
 The generated JSON Schema for `config.toml` lives at `codex-rs/core/config.schema.json`.
 
+## DeepSeek (fork extension)
+
+This fork includes a native DeepSeek provider. Export `DEEPSEEK_API_KEY`, then select either
+supported V4 model directly; Codex automatically routes these model names to DeepSeek unless an
+explicit `model_provider` override is present:
+
+```bash
+export DEEPSEEK_API_KEY="..."
+codex -m deepseek-v4-flash
+codex -m deepseek-v4-pro
+```
+
+The equivalent explicit configuration is `model_provider = "deepseek"`. DeepSeek requests use its
+OpenAI-compatible Chat Completions endpoint, including streamed reasoning and function tools.
+
 ## SQLite State DB
 
 Codex stores the SQLite-backed state DB under `sqlite_home` (config key) or the
