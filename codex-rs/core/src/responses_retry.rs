@@ -6,21 +6,14 @@ use crate::client::ModelClientSession;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use crate::util::backoff;
-use chrono::DateTime;
-use chrono::Utc;
-use codex_async_utils::CancelErr;
-use codex_async_utils::OrCancelExt;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
-use codex_protocol::error::UsageLimitReachedError;
 use codex_protocol::protocol::EventMsg;
-use codex_protocol::protocol::RateLimitReachedType;
 use codex_protocol::protocol::WarningEvent;
-use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-/// Small cushion after the advertised reset time so retries do not race the window boundary.
-const USAGE_LIMIT_RESET_BUFFER: Duration = Duration::from_secs(2);
+const INITIAL_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(5);
+const MAX_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ResponsesStreamRequest {
@@ -28,10 +21,24 @@ pub(crate) enum ResponsesStreamRequest {
     RemoteCompactionV2,
 }
 
+pub(crate) struct ResponsesStreamRetryState {
+    retries: u64,
+    connection_retry_delay: Duration,
+}
+
+impl Default for ResponsesStreamRetryState {
+    fn default() -> Self {
+        Self {
+            retries: 0,
+            connection_retry_delay: INITIAL_CONNECTION_RETRY_DELAY,
+        }
+    }
+}
+
 /// Handles a retryable stream error and returns `Ok(())` when the caller should
 /// retry the request loop.
 pub(crate) async fn handle_retryable_response_stream_error(
-    retries: &mut u64,
+    retry_state: &mut ResponsesStreamRetryState,
     max_retries: u64,
     err: CodexErr,
     client_session: &mut ModelClientSession,
@@ -39,7 +46,28 @@ pub(crate) async fn handle_retryable_response_stream_error(
     turn_context: &TurnContext,
     request: ResponsesStreamRequest,
 ) -> Result<(), CodexErr> {
-    if *retries >= max_retries
+    if matches!(request, ResponsesStreamRequest::Sampling)
+        && matches!(err.details(), CodexErrorDetails::ConnectionFailed(_))
+        && !turn_context.session_source.is_internal()
+        && !turn_context.provider.info().is_amazon_bedrock()
+    {
+        let retry_delay = retry_state.connection_retry_delay;
+        warn!(
+            turn_id = %turn_context.sub_id,
+            error = %err,
+            ?retry_delay,
+            "stream connection failed; waiting to retry"
+        );
+        sess.notify_stream_error(turn_context, "Reconnecting... waiting for network", err)
+            .await;
+        tokio::time::sleep(retry_delay).await;
+        retry_state.connection_retry_delay = retry_delay
+            .saturating_mul(2)
+            .min(MAX_CONNECTION_RETRY_DELAY);
+        return Ok(());
+    }
+
+    if retry_state.retries >= max_retries
         && client_session.try_switch_fallback_transport(
             &turn_context.session_telemetry,
             &turn_context.model_info,
@@ -52,13 +80,13 @@ pub(crate) async fn handle_retryable_response_stream_error(
             }),
         )
         .await;
-        *retries = 0;
+        retry_state.retries = 0;
         return Ok(());
     }
 
-    if *retries < max_retries {
-        *retries += 1;
-        let retry_count = *retries;
+    if retry_state.retries < max_retries {
+        retry_state.retries += 1;
+        let retry_count = retry_state.retries;
         let delay = err.retry_delay().unwrap_or_else(|| backoff(retry_count));
         log_retry(request, turn_context, &err, retry_count, max_retries, delay);
 
@@ -82,72 +110,6 @@ pub(crate) async fn handle_retryable_response_stream_error(
     }
 
     Err(err)
-}
-
-/// Waits until a usage-limit window resets and returns `Ok(())` when the caller should retry the
-/// sampling request. Returns the original error when auto-wait does not apply.
-pub(crate) async fn wait_for_usage_limit_reset_if_applicable(
-    sess: &Session,
-    turn_context: &TurnContext,
-    err: CodexErr,
-    cancellation_token: &CancellationToken,
-) -> Result<(), CodexErr> {
-    let CodexErrorDetails::UsageLimitReached(limit) = err.details() else {
-        return Err(err);
-    };
-
-    if !is_auto_waitable_usage_limit(limit) {
-        return Err(err);
-    }
-
-    let Some(resets_at) = limit.resets_at else {
-        return Err(err);
-    };
-
-    let Some(delay) = delay_until_usage_limit_reset(resets_at) else {
-        return Err(err);
-    };
-
-    warn!(
-        turn_id = %turn_context.sub_id,
-        ?delay,
-        "usage limit reached; waiting for reset before retrying"
-    );
-    sess.notify_stream_error(
-        turn_context,
-        "Waiting for usage limit to reset...".to_string(),
-        err,
-    )
-    .await;
-
-    match tokio::time::sleep(delay)
-        .or_cancel(cancellation_token)
-        .await
-    {
-        Ok(()) => Ok(()),
-        Err(CancelErr::Cancelled) => Err(CodexErr::TurnAborted),
-    }
-}
-
-fn is_auto_waitable_usage_limit(err: &UsageLimitReachedError) -> bool {
-    match err.rate_limit_reached_type {
-        Some(
-            RateLimitReachedType::WorkspaceOwnerCreditsDepleted
-            | RateLimitReachedType::WorkspaceMemberCreditsDepleted
-            | RateLimitReachedType::WorkspaceOwnerUsageLimitReached
-            | RateLimitReachedType::WorkspaceMemberUsageLimitReached,
-        ) => false,
-        Some(RateLimitReachedType::RateLimitReached) | None => err.resets_at.is_some(),
-    }
-}
-
-fn delay_until_usage_limit_reset(resets_at: DateTime<Utc>) -> Option<Duration> {
-    let target = resets_at + chrono::Duration::from_std(USAGE_LIMIT_RESET_BUFFER).ok()?;
-    let now = Utc::now();
-    if target <= now {
-        return Some(Duration::from_secs(0));
-    }
-    (target - now).to_std().ok()
 }
 
 fn log_retry(

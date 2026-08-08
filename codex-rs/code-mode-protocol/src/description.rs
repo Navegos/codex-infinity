@@ -7,10 +7,10 @@ use std::collections::BTreeMap;
 use crate::PUBLIC_TOOL_NAME;
 
 const MAX_JS_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
-const CODE_MODE_ONLY_PREFACE: &str =
-    "Use `exec/wait` tool to run all other tools, do not attempt to use any other tools directly";
-const DEFERRED_NESTED_TOOLS_GUIDANCE: &str = r#"Some nested MCP/app tools may be omitted from this description. They are still available on the global `tools` object and listed in `ALL_TOOLS`.
-To find one, filter `ALL_TOOLS` by `name` and `description`; do not print the full `ALL_TOOLS` array. Print only a small set of relevant matches if you need to inspect them."#;
+const DEFERRED_NESTED_TOOLS_GUIDANCE: &str = r#"Some deferred nested tools may be omitted from this description. They are still available on the global `tools` object and listed in `ALL_TOOLS`.
+To find one, filter `ALL_TOOLS` by `name` and `description`."#;
+const LEGACY_IMAGE_HELPER_DESCRIPTION: &str = r#"`image(imageUrlOrItem: string | { image_url: string; detail?: "auto" | "low" | "high" | "original" | null } | ImageContent, detail?: "auto" | "low" | "high" | "original" | null)`: Appends an image item. `image_url` should be a base64-encoded `data:` URL. To forward an MCP tool image, pass an individual `ImageContent` block from `result.content`, for example `image(result.content[0])`. MCP image blocks may request detail with `_meta: { "codex/imageDetail": "original" }`. When provided, the second `detail` argument overrides any detail embedded in the first argument."#;
+const UNIFIED_IMAGE_HELPER_DESCRIPTION: &str = r#"`image(imageUrlOrItem: string | { image_url: string } | ImageContent)`: Appends an image item. `image_url` should be a base64-encoded `data:` URL. To forward an MCP tool image, pass an individual `ImageContent` block from `result.content`, for example `image(result.content[0])`."#;
 const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run JavaScript code to orchestrate/compose tool calls
 - Evaluates the provided JavaScript code in a fresh V8 isolate as an async module.
 - All nested tools are available on the global `tools` object, for example `await tools.exec_command(...)`. Tool names are exposed as normalized JavaScript identifiers, for example `await tools.mcp__ologs__get_profile(...)`.
@@ -26,7 +26,7 @@ const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run JavaScript code to orchestrate/co
 - Global helpers:
 - `exit()`: Immediately ends the current script successfully (like an early return from the top level).
 - `text(value: string | number | boolean | undefined | null)`: Appends a text item. Non-string values are stringified with `JSON.stringify(...)` when possible.
-- `image(imageUrlOrItem: string | { image_url: string; detail?: "auto" | "low" | "high" | "original" | null } | ImageContent, detail?: "auto" | "low" | "high" | "original" | null)`: Appends an image item. `image_url` can be an HTTPS URL or a base64-encoded `data:` URL. To forward an MCP tool image, pass an individual `ImageContent` block from `result.content`, for example `image(result.content[0])`. MCP image blocks may request detail with `_meta: { "codex/imageDetail": "original" }`. When provided, the second `detail` argument overrides any detail embedded in the first argument.
+- `image(imageUrlOrItem: string | { image_url: string; detail?: "auto" | "low" | "high" | "original" | null } | ImageContent, detail?: "auto" | "low" | "high" | "original" | null)`: Appends an image item. `image_url` should be a base64-encoded `data:` URL. To forward an MCP tool image, pass an individual `ImageContent` block from `result.content`, for example `image(result.content[0])`. MCP image blocks may request detail with `_meta: { "codex/imageDetail": "original" }`. When provided, the second `detail` argument overrides any detail embedded in the first argument.
 - `audio(audioUrlOrItem: string | { audio_url: string } | AudioContent)`: Appends an audio item. `audio_url` should be a base64-encoded `data:` URL. To forward an MCP tool audio block, pass an individual `AudioContent` block from `result.content`, for example `audio(result.content[0])`.
 - `generatedImage(result: { image_url: string; output_hint?: string })`: Appends an image-generation result and its optional output hint. HTTP(S) URLs are not supported.
 - `store(key: string, value: any)`: stores a serializable value under a string key for later `exec` calls in the same session.
@@ -251,21 +251,31 @@ pub fn is_code_mode_nested_tool(tool_name: &str) -> bool {
     tool_name != crate::PUBLIC_TOOL_NAME && tool_name != crate::WAIT_TOOL_NAME
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ImageDetailVisibility {
+    Visible,
+    Hidden,
+}
+
 pub fn build_exec_tool_description(
     enabled_tools: &[ToolDefinition],
     deferred_tools: &[ToolDefinition],
     namespace_descriptions: &BTreeMap<String, ToolNamespaceDescription>,
     default_exec_yield_time_ms: u64,
     code_mode_only: bool,
+    image_detail_visibility: ImageDetailVisibility,
 ) -> String {
     let mut sections = Vec::new();
-    if code_mode_only {
-        sections.push(CODE_MODE_ONLY_PREFACE.to_string());
-    }
     sections.push(EXEC_DESCRIPTION_TEMPLATE.replace(
         "Defaults to 10000 ms.",
         &format!("Defaults to {default_exec_yield_time_ms} ms."),
     ));
+    if image_detail_visibility == ImageDetailVisibility::Hidden {
+        sections[0] = sections[0].replace(
+            LEGACY_IMAGE_HELPER_DESCRIPTION,
+            UNIFIED_IMAGE_HELPER_DESCRIPTION,
+        );
+    }
     if !deferred_tools.is_empty() {
         sections.push(DEFERRED_NESTED_TOOLS_GUIDANCE.to_string());
     }
@@ -719,6 +729,7 @@ fn render_json_schema_literal(value: &JsonValue) -> String {
 #[cfg(test)]
 mod tests {
     use super::CodeModeToolKind;
+    use super::ImageDetailVisibility;
     use super::ParsedExecSource;
     use super::ToolDefinition;
     use super::ToolNamespaceDescription;
@@ -879,11 +890,13 @@ mod tests {
             &BTreeMap::new(),
             crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ true,
+            ImageDetailVisibility::Visible,
         );
         assert!(description.contains(
             "### `foo`
 bar"
         ));
+        assert!(!description.contains("do not attempt to use any other tools directly"));
     }
 
     #[test]
@@ -894,6 +907,7 @@ bar"
             &BTreeMap::new(),
             crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ false,
+            ImageDetailVisibility::Visible,
         );
         assert!(description.contains("`audio(audioUrlOrItem:"));
         assert!(description.contains("`setTimeout(callback: () => void, delayMs?: number)`"));
@@ -948,6 +962,7 @@ bar"
             &namespace_descriptions,
             crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ true,
+            ImageDetailVisibility::Visible,
         );
         assert_eq!(description.matches("## mcp__sample").count(), 1);
         assert!(description.contains("## mcp__sample\nShared namespace guidance."));
@@ -989,6 +1004,7 @@ bar"
             &namespace_descriptions,
             crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ true,
+            ImageDetailVisibility::Visible,
         );
 
         assert!(!description.contains("## mcp__sample"));
@@ -1089,6 +1105,7 @@ bar"
             &BTreeMap::new(),
             crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ true,
+            ImageDetailVisibility::Visible,
         );
 
         assert_eq!(
@@ -1125,6 +1142,7 @@ bar"
             &BTreeMap::new(),
             crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ true,
+            ImageDetailVisibility::Visible,
         );
 
         assert!(description.contains("Some deferred nested tools may be omitted"));
@@ -1147,9 +1165,11 @@ bar"
             &BTreeMap::new(),
             crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ false,
+            ImageDetailVisibility::Visible,
         );
 
         assert!(description.contains("Some deferred nested tools may be omitted"));
         assert!(description.contains("filter `ALL_TOOLS` by `name` and `description`"));
+        assert!(!description.contains("do not print the full `ALL_TOOLS` array"));
     }
 }

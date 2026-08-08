@@ -37,6 +37,7 @@ use wiremock::matchers::header;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 use wiremock::matchers::query_param;
+use wiremock::matchers::query_param_is_missing;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const WATCHER_TIMEOUT: Duration = Duration::from_secs(20);
@@ -365,7 +366,6 @@ enabled = true
 
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
-        .without_auto_env()
         .build_initialized_with_timeout(DEFAULT_TIMEOUT)
         .await?;
 
@@ -380,7 +380,13 @@ enabled = true
     let initial_skills_list_request_id = mcp
         .send_skills_list_request(SkillsListParams {
             cwds: vec![cwd.path().to_path_buf()],
-            force_reload: true,
+            force_reload: false,
+        })
+        .await?;
+    let thread_start_request_id = mcp
+        .send_thread_start_request_with_auto_env(ThreadStartParams {
+            cwd: Some(cwd.path().to_string_lossy().into_owned()),
+            ..Default::default()
         })
         .await?;
     let SkillsListResponse { data } = timeout(
@@ -394,6 +400,31 @@ enabled = true
             .iter()
             .any(|skill| skill.name == "google-calendar:meeting-prep")
     }));
+    let _: ThreadStartResponse =
+        timeout(DEFAULT_TIMEOUT, mcp.read_response(thread_start_request_id)).await??;
+
+    std::fs::write(
+        codex_home.path().join(
+            "plugins/cache/openai-curated/google-calendar/local/skills/meeting-prep/SKILL.md",
+        ),
+        "---\nname: meeting-prep\ndescription: Updated meeting preparation\n---\n\n# Body\n",
+    )?;
+    for force_reload in [true, false] {
+        let request_id = mcp
+            .send_skills_list_request(SkillsListParams {
+                cwds: vec![cwd.path().to_path_buf()],
+                force_reload,
+            })
+            .await?;
+        let SkillsListResponse { data } =
+            timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
+        assert!(data.iter().any(|entry| {
+            entry.skills.iter().any(|skill| {
+                skill.name == "google-calendar:meeting-prep"
+                    && skill.description == "Updated meeting preparation"
+            })
+        }));
+    }
 
     let enablement_request_id = mcp
         .send_experimental_feature_enablement_set_request(ExperimentalFeatureEnablementSetParams {
@@ -549,6 +580,14 @@ async fn skills_list_loads_remote_installed_plugin_skills_from_cache() -> Result
             .mount(&server)
             .await;
     }
+    Mock::given(method("GET"))
+        .and(path("/backend-api/ps/plugins/installed"))
+        .and(query_param_is_missing("scope"))
+        .and(header("authorization", "Bearer chatgpt-token"))
+        .and(header("chatgpt-account-id", "account-123"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(global_installed_body))
+        .mount(&server)
+        .await;
 
     let plugin_list_request_id = mcp
         .send_plugin_list_request(PluginListParams {

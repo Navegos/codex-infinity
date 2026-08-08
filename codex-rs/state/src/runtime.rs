@@ -52,6 +52,7 @@ mod memories;
 mod queued_items;
 mod recovery;
 mod remote_control;
+mod rollout_migration;
 #[cfg(test)]
 pub(crate) mod test_support;
 mod thread_section_order;
