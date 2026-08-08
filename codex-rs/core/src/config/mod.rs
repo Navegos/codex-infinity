@@ -82,12 +82,8 @@ use codex_mcp::McpProtocolMode;
 use codex_mcp::McpServerRegistration;
 use codex_mcp::ResolvedMcpCatalog;
 use codex_memories_read::memory_root;
-<<<<<<< HEAD
 use codex_model_provider::ProviderCapabilities;
-||||||| 0754a16287
-=======
 use codex_model_provider_info::DEEPSEEK_PROVIDER_ID;
->>>>>>> @{-1}
 use codex_model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
