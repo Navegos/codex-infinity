@@ -1,0 +1,19 @@
+[mcp_servers.openpaths]
+url = "https://openpaths.io/mcp"
+bearer_token_env_var = "OPENPATHS_API_KEY"
+tool_timeout_sec = 600
+default_tools_approval_mode = "prompt"
+
+[mcp_servers.app-nz]
+command = "app"
+args = ["mcp", "serve"]
+env_vars = ["APP_API_KEY"]
+startup_timeout_sec = 15
+tool_timeout_sec = 600
+default_tools_approval_mode = "prompt"
+
+[mcp_servers.manifoldgen]
+url = "https://manifoldgen.com/api/mcp"
+bearer_token_env_var = "MANIFOLDGEN_API_KEY"
+tool_timeout_sec = 600
+default_tools_approval_mode = "prompt"

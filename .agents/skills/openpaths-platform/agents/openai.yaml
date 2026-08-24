@@ -1,0 +1,11 @@
+interface:
+  display_name: "OpenPaths Platform"
+  short_description: "Build and operate the OpenPaths gateway"
+  default_prompt: "Use $openpaths-platform to make a tested change in ../openpaths."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "openpaths"
+      description: "OpenPaths model gateway MCP server"
+      transport: "streamable_http"
+      url: "https://openpaths.io/mcp"

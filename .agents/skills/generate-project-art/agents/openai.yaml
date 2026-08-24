@@ -1,0 +1,11 @@
+interface:
+  display_name: "Generate Project Art"
+  short_description: "Generate art with Netwrck or OpenPaths"
+  default_prompt: "Use $generate-project-art to create an image asset for this project."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "openpaths"
+      description: "OpenPaths image generation MCP server"
+      transport: "streamable_http"
+      url: "https://openpaths.io/mcp"

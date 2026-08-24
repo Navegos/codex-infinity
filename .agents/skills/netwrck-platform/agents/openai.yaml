@@ -1,0 +1,4 @@
+interface:
+  display_name: "Netwrck Platform"
+  short_description: "Build and operate the Netwrck platform"
+  default_prompt: "Use $netwrck-platform to make a tested change in ../netwrck."

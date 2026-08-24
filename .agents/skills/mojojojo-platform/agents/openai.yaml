@@ -1,0 +1,4 @@
+interface:
+  display_name: "mojojojo Platform"
+  short_description: "Build and operate the mojojojo platform"
+  default_prompt: "Use $mojojojo-platform to make a tested change in ../mojojojo."

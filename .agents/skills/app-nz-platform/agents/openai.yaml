@@ -1,0 +1,11 @@
+interface:
+  display_name: "app.nz Platform"
+  short_description: "Build app.nz web, CLI, desktop, and MCP"
+  default_prompt: "Use $app-nz-platform to make a parity-safe change in ../app-site."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "app-nz"
+      description: "Authenticated app.nz platform MCP server"
+      transport: "streamable_http"
+      url: "https://app.nz/mcp"

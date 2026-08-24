@@ -1,0 +1,11 @@
+interface:
+  display_name: "ManifoldGen Platform"
+  short_description: "Build and operate ManifoldGen with its MCP"
+  default_prompt: "Use $manifoldgen-platform to work on ManifoldGen through its repository or MCP server."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "manifoldgen"
+      description: "ManifoldGen media generation and search MCP server"
+      transport: "streamable_http"
+      url: "https://manifoldgen.com/api/mcp"

@@ -1,0 +1,11 @@
+interface:
+  display_name: "Generate Project Video"
+  short_description: "Generate video with Netwrck or OpenPaths"
+  default_prompt: "Use $generate-project-video to create a video asset for this project."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "app-nz"
+      description: "app.nz video Cog MCP server"
+      transport: "streamable_http"
+      url: "https://app.nz/mcp"
