@@ -196,7 +196,13 @@ async fn shell_command_handler_can_disable_timeouts_from_config() {
         ),
         PathUri::from_abs_path(&cwd),
         Vec::new(),
-        None,
+        /*shell*/ None,
+        EnvironmentConfig {
+            allow_login_shell: true,
+            permission_profile: PermissionProfileSnapshot::legacy(
+                codex_protocol::models::PermissionProfile::read_only(),
+            ),
+        },
     );
     let exec_params = ShellCommandHandler::to_exec_params(
         &params,
@@ -204,7 +210,6 @@ async fn shell_command_handler_can_disable_timeouts_from_config() {
         &turn_context,
         &turn_environment,
         cwd,
-        /*allow_login_shell*/ true,
     )
     .expect("exec params");
 

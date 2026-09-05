@@ -132,6 +132,7 @@ pub async fn generate_auto_next_prompt(
         }],
         base_instructions: BaseInstructions {
             text: INSTRUCTIONS.to_string(),
+            provenance: None,
         },
         output_schema: Some(json!({
             "type": "object",
