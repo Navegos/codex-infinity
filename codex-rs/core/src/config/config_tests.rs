@@ -1004,6 +1004,48 @@ async fn deepseek_model_automatically_selects_native_provider() {
 }
 
 #[tokio::test]
+async fn openrouter_model_automatically_selects_native_provider() {
+    let config = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides {
+            model: Some("openrouter/stealth/ox-alpha".into()),
+            ..Default::default()
+        },
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("load config");
+
+    assert_eq!(config.model.as_deref(), Some("openrouter/stealth/ox-alpha"));
+    assert_eq!(config.model_provider_id, "openrouter");
+    assert_eq!(
+        config.model_provider.env_key.as_deref(),
+        Some("OPENROUTER_API_KEY")
+    );
+}
+
+#[tokio::test]
+async fn openpaths_model_automatically_selects_native_provider() {
+    let config = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides {
+            model: Some("openpaths/gpt-5.6-sol".into()),
+            ..Default::default()
+        },
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("load config");
+
+    assert_eq!(config.model.as_deref(), Some("openpaths/gpt-5.6-sol"));
+    assert_eq!(config.model_provider_id, "openpaths");
+    assert_eq!(
+        config.model_provider.env_key.as_deref(),
+        Some("OPENPATHS_API_KEY")
+    );
+}
+
+#[tokio::test]
 async fn load_config_applies_amazon_bedrock_transport_overrides() {
     let cfg = toml::from_str::<ConfigToml>(
         r#"

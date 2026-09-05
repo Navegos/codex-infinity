@@ -87,6 +87,8 @@ use codex_model_provider_info::DEEPSEEK_PROVIDER_ID;
 use codex_model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
+use codex_model_provider_info::OPENPATHS_PROVIDER_ID;
+use codex_model_provider_info::OPENROUTER_PROVIDER_ID;
 use codex_model_provider_info::built_in_model_providers;
 use codex_model_provider_info::merge_configured_model_providers;
 use codex_models_manager::ModelsManagerConfig;
@@ -3767,15 +3769,24 @@ impl Config {
             merge_configured_model_providers(built_in_model_providers(openai_base_url), cfg.model_providers)
                 .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message))?;
 
+        let requested_model = model.as_deref().or(cfg.model.as_deref());
         let inferred_deepseek_provider = model_provider.is_none()
             && cfg.model_provider.is_none()
-            && model
-                .as_deref()
-                .or(cfg.model.as_deref())
+            && requested_model
                 .is_some_and(|model| matches!(model, "deepseek-v4-flash" | "deepseek-v4-pro"));
+        let inferred_openrouter_provider = model_provider.is_none()
+            && cfg.model_provider.is_none()
+            && requested_model.is_some_and(|model| model.starts_with("openrouter/"));
+        let inferred_openpaths_provider = model_provider.is_none()
+            && cfg.model_provider.is_none()
+            && requested_model.is_some_and(|model| model.starts_with("openpaths/"));
         let model_provider_id = model_provider.or(cfg.model_provider).unwrap_or_else(|| {
             if inferred_deepseek_provider {
                 DEEPSEEK_PROVIDER_ID.to_string()
+            } else if inferred_openrouter_provider {
+                OPENROUTER_PROVIDER_ID.to_string()
+            } else if inferred_openpaths_provider {
+                OPENPATHS_PROVIDER_ID.to_string()
             } else {
                 "openai".to_string()
             }

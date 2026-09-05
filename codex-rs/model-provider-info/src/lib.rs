@@ -39,6 +39,8 @@ pub const DEEPSEEK_PROVIDER_ID: &str = "deepseek";
 pub const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com";
 pub const DEEPSEEK_FLASH_MODEL_ID: &str = "deepseek-v4-flash";
 pub const DEEPSEEK_PRO_MODEL_ID: &str = "deepseek-v4-pro";
+pub const OPENROUTER_PROVIDER_ID: &str = "openrouter";
+pub const OPENPATHS_PROVIDER_ID: &str = "openpaths";
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const AMAZON_BEDROCK_PROVIDER_NAME: &str = "Amazon Bedrock";
 pub const AMAZON_BEDROCK_PROVIDER_ID: &str = "amazon-bedrock";
@@ -402,6 +404,20 @@ impl ModelProviderInfo {
         }
     }
 
+    pub fn create_openai_compatible_provider(
+        name: &str,
+        base_url: &str,
+        env_key: &str,
+    ) -> ModelProviderInfo {
+        Self {
+            name: name.into(),
+            base_url: Some(base_url.into()),
+            env_key: Some(env_key.into()),
+            wire_api: WireApi::Chat,
+            ..Self::default()
+        }
+    }
+
     pub fn create_amazon_bedrock_provider(
         aws: Option<ModelProviderAwsAuthInfo>,
     ) -> ModelProviderInfo {
@@ -477,12 +493,24 @@ pub fn built_in_model_providers(
     let openai_provider = P::create_openai_provider(openai_base_url);
     let amazon_bedrock_provider = P::create_amazon_bedrock_provider(/*aws*/ None);
     let deepseek_provider = P::create_deepseek_provider();
+    let openrouter_provider = P::create_openai_compatible_provider(
+        "OpenRouter",
+        "https://openrouter.ai/api/v1",
+        "OPENROUTER_API_KEY",
+    );
+    let openpaths_provider = P::create_openai_compatible_provider(
+        "OpenPaths",
+        "https://openpaths.io/v1",
+        "OPENPATHS_API_KEY",
+    );
 
     // This fork includes DeepSeek alongside the upstream OpenAI and local OSS providers.
     [
         (OPENAI_PROVIDER_ID, openai_provider),
         (AMAZON_BEDROCK_PROVIDER_ID, amazon_bedrock_provider),
         (DEEPSEEK_PROVIDER_ID, deepseek_provider),
+        (OPENROUTER_PROVIDER_ID, openrouter_provider),
+        (OPENPATHS_PROVIDER_ID, openpaths_provider),
         (
             OLLAMA_OSS_PROVIDER_ID,
             create_oss_provider(DEFAULT_OLLAMA_PORT, WireApi::Responses),
