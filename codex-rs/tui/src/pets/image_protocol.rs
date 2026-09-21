@@ -267,6 +267,45 @@ pub fn kitty_transmit_png_file_with_id(
     Ok(wrap_for_tmux_if_needed(&command))
 }
 
+pub fn kitty_transmit_rgba_with_id(
+    rgba: &[u8],
+    width_px: u32,
+    height_px: u32,
+    columns: u16,
+    rows: u16,
+    image_id: Option<u32>,
+) -> Result<String> {
+    let payload = general_purpose::STANDARD.encode(rgba);
+    let chunks = payload
+        .as_bytes()
+        .chunks(KITTY_CHUNK_SIZE)
+        .collect::<Vec<_>>();
+
+    let mut command = String::new();
+    for (index, chunk) in chunks.iter().enumerate() {
+        let chunk = std::str::from_utf8(chunk).context("base64 payload is not valid UTF-8")?;
+        let has_more = index + 1 < chunks.len();
+        let more_flag = u8::from(has_more);
+        if index == 0 {
+            let image_id = kitty_image_id_arg(image_id);
+            command.push_str(&format!(
+                "{ESC}_Ga=T,t=d,f=24,s={width_px},v={height_px},c={columns},r={rows},q=2{image_id},m={more_flag};{chunk}{ST}",
+            ));
+        } else {
+            command.push_str(&format!("{ESC}_Gm={more_flag};{chunk}{ST}"));
+        }
+    }
+
+    Ok(wrap_for_tmux_if_needed(&command))
+}
+
+/// Display a previously transmitted image without resending pixel data.
+pub fn kitty_place_image(image_id: u32, columns: u16, rows: u16) -> String {
+    wrap_for_tmux_if_needed(&format!(
+        "{ESC}_Ga=p,i={image_id},c={columns},r={rows},q=2;{ST}"
+    ))
+}
+
 fn kitty_image_id_arg(image_id: Option<u32>) -> String {
     image_id
         .map(|image_id| format!(",i={image_id}"))
@@ -424,7 +463,7 @@ mod tests {
         assert_eq!(
             pet_image_support_for_terminal(&terminal_info_for_test(
                 TerminalName::Kitty,
-                Some(Multiplexer::Zellij {}),
+                Some(Multiplexer::Zellij { version: None }),
                 Some("kitty"),
                 /*term*/ None,
             )),
@@ -692,6 +731,40 @@ mod tests {
         assert_eq!(
             command,
             format!("\x1b_Ga=T,t=f,f=100,c=4,r=3,q=2,i=7;{payload}\x1b\\")
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn kitty_rgba_transmission_declares_direct_rgb_payload() {
+        let _guard = EnvVarGuard::new("TMUX", /*value*/ None);
+        let rgba = [255u8, 0, 0, 255, 0, 255, 0, 255];
+
+        let command = kitty_transmit_rgba_with_id(
+            &rgba,
+            /*width_px*/ 2,
+            /*height_px*/ 1,
+            /*columns*/ 4,
+            /*rows*/ 3,
+            /*image_id*/ Some(7),
+        )
+        .unwrap();
+        let payload = general_purpose::STANDARD.encode(rgba);
+
+        assert_eq!(
+            command,
+            format!("\x1b_Ga=T,t=d,f=24,s=2,v=1,c=4,r=3,q=2,i=7,m=0;{payload}\x1b\\")
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn kitty_place_command_references_transmitted_image() {
+        let _guard = EnvVarGuard::new("TMUX", /*value*/ None);
+
+        assert_eq!(
+            kitty_place_image(/*image_id*/ 7, /*columns*/ 4, /*rows*/ 3),
+            "\x1b_Ga=p,i=7,c=4,r=3,q=2;\x1b\\"
         );
     }
 }

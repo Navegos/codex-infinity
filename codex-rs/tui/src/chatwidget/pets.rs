@@ -112,7 +112,10 @@ impl ChatWidget {
 
     pub(crate) fn history_wrap_width(&self, width: u16) -> u16 {
         width
-            .saturating_sub(self.ambient_pet_wrap_reserved_cols())
+            .saturating_sub(
+                self.ambient_pet_wrap_reserved_cols()
+                    .max(self.message_images_wrap_reserved_cols()),
+            )
             .max(1)
     }
 

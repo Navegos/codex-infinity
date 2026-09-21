@@ -1075,20 +1075,31 @@ impl App {
                         tui.discard_pending_input_before_interactive_screen()?;
                         self.startup_pending_protected_request = false;
                     }
+                    let overlay_area = Rect::new(
+                        /*x*/ 0,
+                        /*y*/ 0,
+                        screen_size.width,
+                        screen_size.height,
+                    );
+                    let mut pet_top_y = None;
                     if self.chat_widget.ambient_pet_image_enabled() {
-                        let ambient_pet_area = Rect::new(
-                            /*x*/ 0,
-                            /*y*/ 0,
-                            screen_size.width,
-                            screen_size.height,
-                        );
-                        if let Err(err) = tui.draw_ambient_pet_image(
-                            self.chat_widget
-                                .ambient_pet_draw(ambient_pet_area, rendered_area.bottom()),
-                        ) {
+                        let pet_draw = self
+                            .chat_widget
+                            .ambient_pet_draw(overlay_area, rendered_area.bottom());
+                        pet_top_y = pet_draw.as_ref().map(|draw| draw.y);
+                        if let Err(err) = tui.draw_ambient_pet_image(pet_draw) {
                             self.handle_ambient_pet_image_render_error(tui, err)?;
                         }
                     }
+                    let message_images = self.chat_widget.message_images_draw(
+                        overlay_area,
+                        rendered_area.bottom(),
+                        pet_top_y,
+                    );
+                    if (message_images.is_some() || tui.message_images_visible())
+                        && let Err(err) = tui.draw_message_images(message_images) {
+                            return Err(err.into());
+                        }
                     if let Some(request) = self.chat_widget.pet_picker_preview_draw() {
                         if let Err(err) = tui.draw_pet_picker_preview_image(Some(request)) {
                             self.handle_pet_picker_preview_image_render_error(tui, err)?;
@@ -1112,6 +1123,9 @@ impl App {
 
     pub(super) fn show_shutdown_feedback(&mut self, tui: &mut tui::Tui) -> Result<()> {
         self.disable_ambient_pet_before_shutdown(tui)?;
+        if let Err(err) = tui.draw_message_images(None) {
+            tracing::warn!(error = %err, "failed to clear message images before shutdown");
+        }
         self.chat_widget.show_shutdown_in_progress();
         let screen_size = tui.terminal.last_known_screen_size;
         self.handle_draw_pre_render(tui, screen_size)?;

@@ -354,6 +354,7 @@ mod startup_submission;
 use self::interrupts::InterruptManager;
 mod keymap_picker;
 mod mcp_startup;
+mod message_image_overlay;
 use self::mcp_startup::McpStartupStatus;
 mod misalignment_policy;
 pub(crate) use misalignment_policy::MisalignmentReview;
@@ -519,7 +520,6 @@ const APPROVE_FOR_ME_LABEL: &str = "Approve for me";
 const AUTO_REVIEW_DESCRIPTION: &str = "Only ask for actions detected as potentially unsafe.";
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_STATUS_LINE_ITEMS: [&str; 3] = ["model-with-reasoning", "current-dir", "thread-name"];
-const MAX_AGENT_COPY_HISTORY: usize = 32;
 const AUTO_NEXT_REVIEW_INTERVAL: usize = 3;
 const AUTO_NEXT_DONE_SUFFIX_STEPS: &str =
     "\n\nWhen there are no more meaningful next steps, create this file exactly: ";
@@ -855,6 +855,7 @@ pub(crate) struct ChatWidget {
     last_rendered_user_message_display: Option<UserMessageDisplay>,
     last_rendered_user_message_client_id: Option<String>,
     last_non_retry_error: Option<(String, String)>,
+    last_message_images: Vec<PathBuf>,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]

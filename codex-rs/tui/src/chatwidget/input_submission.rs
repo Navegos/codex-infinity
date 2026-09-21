@@ -24,6 +24,7 @@ impl ChatWidget {
         let local_images = self
             .bottom_pane
             .take_recent_submission_images_with_placeholders();
+        self.note_submitted_message_images(&local_images);
         let remote_image_urls = self.take_remote_image_urls();
         UserMessage {
             text,

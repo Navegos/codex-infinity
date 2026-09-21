@@ -621,6 +621,7 @@ pub struct Tui {
     screen_size: ScreenSizePolicy,
     ambient_pet_image_state: crate::pets::PetImageRenderState,
     pet_picker_preview_image_state: crate::pets::PetImageRenderState,
+    message_images_state: crate::message_images::MessageImageOverlayState,
     alt_saved_viewport: Option<ratatui::layout::Rect>,
     #[cfg(unix)]
     suspend_context: SuspendContext,
@@ -694,6 +695,7 @@ impl Tui {
             screen_size: ScreenSizePolicy::default(),
             ambient_pet_image_state: crate::pets::PetImageRenderState::default(),
             pet_picker_preview_image_state: crate::pets::PetImageRenderState::default(),
+            message_images_state: crate::message_images::MessageImageOverlayState::default(),
             alt_saved_viewport: None,
             #[cfg(unix)]
             suspend_context: SuspendContext::new(),
@@ -1255,6 +1257,35 @@ impl Tui {
                 Err(err @ crate::pets::PetImageRenderError::Asset(_)) => Ok(Err(err)),
             }
         })??
+    }
+
+    pub fn message_images_visible(&self) -> bool {
+        !self.message_images_state.visible.is_empty()
+    }
+
+    pub fn draw_message_images(
+        &mut self,
+        request: Option<(
+            Vec<crate::message_images::MessageImagePlacement>,
+            crate::pets::image_protocol::ImageProtocol,
+        )>,
+    ) -> std::io::Result<()> {
+        ensure_virtual_terminal_processing()?;
+
+        let terminal = &mut self.terminal;
+        let state = &mut self.message_images_state;
+        stdout().sync_update(|_| {
+            let backend = terminal.backend_mut();
+            match request {
+                Some((placements, protocol)) => crate::message_images::draw_message_images(
+                    backend,
+                    state,
+                    &placements,
+                    protocol,
+                ),
+                None => crate::message_images::clear_message_images(backend, state),
+            }
+        })?
     }
 
     pub fn draw_pet_picker_preview_image(
