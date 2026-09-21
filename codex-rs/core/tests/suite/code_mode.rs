@@ -368,7 +368,49 @@ async fn missing_process_host_falls_back_to_direct_tools_and_warns_once() -> Res
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn missing_process_host_keeps_code_mode_only_and_fails_closed() -> Result<()> {
+async fn missing_process_host_falls_back_to_direct_tools_for_code_mode_only() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = responses::start_mock_server().await;
+    let mut builder = test_codex()
+        .with_model("test-gpt-5.1-codex")
+        .with_code_mode_host_program("codex-code-mode-host-does-not-exist".into())
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::CodeModeOnly)
+                .expect("code mode should be enabled");
+        });
+    let test = builder.build_with_auto_env(&server).await?;
+    let (first_body, first_warnings) = run_unavailable_code_mode_turn(&server, &test).await?;
+    let first_tools = tool_names(&first_body);
+    assert!(
+        first_tools
+            .iter()
+            .all(|name| name != "exec" && name != "wait"),
+        "unavailable code mode must not expose code-mode tools: {first_tools:?}"
+    );
+    assert!(
+        first_tools
+            .iter()
+            .any(|name| matches!(name.as_str(), "shell" | "exec_command")),
+        "code-mode-only fallback must expose direct shell tools: {first_tools:?}"
+    );
+    assert!(
+        first_warnings.iter().any(|warning| {
+            warning.contains("Code Mode is unavailable")
+                && warning.contains("codex-code-mode-host-does-not-exist")
+                && warning.contains("Falling back to direct tools")
+        }),
+        "missing host should produce an actionable warning: {first_warnings:?}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn missing_process_host_code_mode_only_fails_closed_when_direct_fallback_is_disabled()
+-> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -380,6 +422,7 @@ async fn missing_process_host_keeps_code_mode_only_and_fails_closed() -> Result<
                 .features
                 .enable(Feature::CodeModeOnly)
                 .expect("code mode should be enabled");
+            config.code_mode.disable_in_process_fallback = true;
         });
     let (_test, follow_up_mock) = run_code_mode_turn_with_builder(
         &server,
@@ -392,18 +435,12 @@ async fn missing_process_host_keeps_code_mode_only_and_fails_closed() -> Result<
     let tools = tool_names(&request.body_json());
     assert!(
         tools.iter().any(|name| name == "exec") && tools.iter().any(|name| name == "wait"),
-        "code-mode-only must retain code-mode tools: {tools:?}"
-    );
-    assert!(
-        tools
-            .iter()
-            .all(|name| !matches!(name.as_str(), "shell" | "exec_command")),
-        "code-mode-only must never expose direct shell tools: {tools:?}"
+        "disabled fallback must retain code-mode tools: {tools:?}"
     );
     let (output, _) = custom_tool_output_body_and_success(&request, "call-1");
     assert!(
         output.contains("codex-code-mode-host-does-not-exist"),
-        "code-mode-only must report the host failure: {output}"
+        "disabled fallback must report the host failure: {output}"
     );
 
     Ok(())
