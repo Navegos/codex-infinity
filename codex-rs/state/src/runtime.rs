@@ -93,7 +93,6 @@ pub use threads::ThreadFilterOptions;
 // metadata, rather than the exact sum of all persisted SQLite column bytes.
 const LOG_PARTITION_SIZE_LIMIT_BYTES: i64 = 10 * 1024 * 1024;
 const LOG_PARTITION_ROW_LIMIT: i64 = 1_000;
-const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 const SQLITE_LOCK_STARTUP_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 const SQLITE_LOCK_STARTUP_RETRY_INTERVAL: Duration = Duration::from_millis(250);
 const SQLITE_FALLBACK_HOME_ENV: &str = "CODEX_SQLITE_FALLBACK_HOME";

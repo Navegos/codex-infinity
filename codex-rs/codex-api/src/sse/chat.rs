@@ -222,6 +222,7 @@ pub(crate) async fn process_chat_sse<S>(
             response_id: String::new(),
             token_usage: None,
             end_turn: None,
+            usage_metadata: None,
         }))
         .await;
 }

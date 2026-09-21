@@ -46,7 +46,7 @@ fn paste_hidden_shell_payload(chat: &mut ChatWidget) -> String {
     chat.handle_paste(payload.clone());
     assert_eq!(
         chat.bottom_pane.composer_text(),
-        format!("[Pasted Content {} chars]", payload.len())
+        crate::bottom_pane::large_paste_placeholder(&payload)
     );
     payload
 }
@@ -1202,8 +1202,14 @@ async fn startup_draft_handoff_rebases_cursor_around_colliding_large_pastes() {
 
         chat.restore_startup_draft(startup_draft);
 
-        let first_placeholder = "[Pasted Content 1001 chars] #2";
-        let second_placeholder = "[Pasted Content 1002 chars] #2";
+        let first_placeholder = format!(
+            "{} #2",
+            crate::bottom_pane::large_paste_placeholder(&"a".repeat(/*n*/ 1_001))
+        );
+        let second_placeholder = format!(
+            "{} #2",
+            crate::bottom_pane::large_paste_placeholder(&"b".repeat(/*n*/ 1_002))
+        );
         let expected_text =
             format!("{existing_text}\né{first_placeholder} 中 {second_placeholder} tail");
         let expected_cursor = existing_text.len() + 1 + startup_cursor + expected_added_bytes;

@@ -9,6 +9,7 @@
 
 use std::path::PathBuf;
 
+use codex_history::RolloutItem;
 use codex_login::AuthManager;
 use codex_login::auth::AgentIdentityAuthPolicy;
 use codex_model_provider_info::ModelProviderInfo;
@@ -21,7 +22,6 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::ReasoningItemReasoningSummary;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
-use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::SessionSource;
 use codex_rollout_trace::InferenceTraceContext;
 use futures::StreamExt;
@@ -88,7 +88,9 @@ pub async fn generate_auto_next_prompt(
     );
 
     let auth_manager =
-        AuthManager::shared_from_config(&config, /*enable_codex_api_key_env*/ false).await;
+        AuthManager::shared_from_config(&config, /*enable_codex_api_key_env*/ false)
+            .await
+            .ok()?;
     let model_info = model_info_from_slug(GENERATOR_MODEL);
 
     let installation_id = resolve_installation_id(&config.codex_home).await.ok()?;
@@ -102,12 +104,15 @@ pub async fn generate_auto_next_prompt(
         SessionSource::Cli,
         "codex-auto-next".to_string(),
         /*model_verbosity*/ None,
+        /*content_item_kinds_enabled*/ false,
+        /*reasoning_effort_override_enabled*/ false,
         /*enable_request_compression*/ false,
         /*include_timing_metrics*/ false,
         /*beta_features_header*/ None,
         /*concurrent_reasoning_summaries_enabled*/ false,
         /*attestation_provider*/ None,
         config.http_client_factory(),
+        config.workspace_routing_context(),
     );
     let session_telemetry = SessionTelemetry::new(
         conversation_id,
@@ -252,10 +257,17 @@ fn format_response_item(item: &ResponseItem) -> Option<String> {
         )),
         ResponseItem::FunctionCallOutput {
             call_id, output, ..
-        } => Some(format!(
-            "tool_output {call_id}: {}",
-            truncate(&output.to_string(), ITEM_CHARS)
-        )),
+        } => output
+            .body
+            .to_text()
+            .filter(|text| !text.trim().is_empty())
+            .map(|text| {
+                format!(
+                    "tool_output {}: {}",
+                    call_id.as_deref().unwrap_or("?"),
+                    truncate(&text, ITEM_CHARS)
+                )
+            }),
         ResponseItem::CustomToolCall {
             name,
             input,

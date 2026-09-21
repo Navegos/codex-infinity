@@ -175,7 +175,6 @@ const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=20
 const X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER: &str =
     "x-openai-internal-codex-responses-lite";
 const REALTIME_CALLS_ENDPOINT: &str = "/realtime/calls";
-const RESPONSES_ENDPOINT: &str = "/responses";
 const CHAT_COMPLETIONS_ENDPOINT: &str = "/chat/completions";
 const MEMORIES_SUMMARIZE_ENDPOINT: &str = "/memories/trace_summarize";
 #[cfg(test)]
@@ -1788,10 +1787,15 @@ impl ModelClientSession {
                 "output_schema is not supported by Chat Completions providers".into(),
             ));
         }
-        let client_setup = self.client.current_client_setup().await?;
-        let transport = self
+        let client_setup = self
             .client
-            .build_api_transport(&client_setup.api_provider, CHAT_COMPLETIONS_ENDPOINT)?;
+            .current_client_setup(ClientRouting::ConfiguredProvider)
+            .await?;
+        let transport = self.client.build_api_transport(
+            &client_setup.api_provider,
+            CHAT_COMPLETIONS_ENDPOINT,
+            client_setup.redirect_policy,
+        )?;
         let request_auth_context = AuthRequestTelemetryContext::new(
             client_setup.auth.as_ref().map(CodexAuth::auth_mode),
             client_setup.api_auth.as_ref(),

@@ -115,15 +115,8 @@ pub(super) fn rollout_items_from_messages(messages: Vec<ConversationMessage>) ->
                 )));
                 items.push(RolloutItem::EventMsg(EventMsg::UserMessage(
                     UserMessageEvent {
-                        client_id: None,
                         message: message.text.clone(),
-                        images: None,
-                        image_details: Vec::new(),
-                        local_images: Vec::new(),
-                        local_image_details: Vec::new(),
-                        audio: None,
-                        local_audio: Vec::new(),
-                        text_elements: Vec::new(),
+                        ..Default::default()
                     },
                 )));
                 response_item_bytes =

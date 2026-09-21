@@ -118,14 +118,6 @@ pub(crate) fn output_lines(
     output: Option<&CommandOutput>,
     params: OutputLinesParams,
 ) -> OutputLines {
-    output_lines_with_renderer(output, params, ansi_escape_line)
-}
-
-fn output_lines_with_renderer(
-    output: Option<&CommandOutput>,
-    params: OutputLinesParams,
-    render_line: impl Fn(&str) -> Line<'static>,
-) -> OutputLines {
     let OutputLinesParams {
         line_limit,
         only_err,
@@ -213,6 +205,7 @@ fn activity_marker(start_time: Option<Instant>, animations_enabled: bool) -> Spa
         MotionMode::from_animations_enabled(animations_enabled),
         ReducedMotionIndicator::StaticBullet,
     )
+    .unwrap_or_else(|| "•".dim())
 }
 
 impl HistoryCell for ExecCell {
@@ -1279,111 +1272,6 @@ mod tests {
                 .count(),
             1,
             "expected full URL-like query in one rendered line, got: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn exploring_display_uses_shell_command_labels() {
-        let call = ExecCall {
-            call_id: "call-id".to_string(),
-            command: vec!["bash".into(), "-lc".into(), "echo done".into()],
-            parsed: vec![
-                ParsedCommand::Search {
-                    cmd: "rg shimmer_spans codex-rs/tui/src".into(),
-                    query: Some("shimmer_spans".into()),
-                    path: Some("codex-rs/tui/src".into()),
-                },
-                ParsedCommand::Read {
-                    cmd: "sed -n '1,40p' codex-rs/tui/src/status_indicator_widget.rs".into(),
-                    name: "status_indicator_widget.rs".into(),
-                    path: "codex-rs/tui/src/status_indicator_widget.rs".into(),
-                },
-            ],
-            output: None,
-            source: ExecCommandSource::Agent,
-            start_time: None,
-            duration: None,
-            interaction_input: None,
-        };
-
-        let cell = ExecCell::new(call, /*animations_enabled*/ false);
-        let rendered = cell
-            .display_lines(/*width*/ 100)
-            .iter()
-            .map(render_line_text)
-            .join("\n");
-
-        assert!(rendered.contains("rg shimmer_spans codex-rs/tui/src"));
-        assert!(rendered.contains("sed -n '1,40p' codex-rs/tui/src/status_indicator_widget.rs"));
-        assert!(!rendered.contains("Search shimmer_spans"));
-        assert!(!rendered.contains("Read status_indicator_widget.rs"));
-    }
-
-    #[test]
-    fn read_output_uses_file_extension_for_syntax_highlighting() {
-        let call = ExecCall {
-            call_id: "call-id".to_string(),
-            command: vec![
-                "bash".into(),
-                "-lc".into(),
-                "sed -n '1,3p' src/main.rs".into(),
-            ],
-            parsed: vec![ParsedCommand::Read {
-                cmd: "sed -n '1,3p' src/main.rs".into(),
-                name: "main.rs".into(),
-                path: "src/main.rs".into(),
-            }],
-            output: Some(CommandOutput::new(
-                /*exit_code*/ 0,
-                "fn main() { let value = 1; }".to_string(),
-            )),
-            source: ExecCommandSource::Agent,
-            start_time: None,
-            duration: None,
-            interaction_input: None,
-        };
-
-        let cell = ExecCell::new(call, /*animations_enabled*/ false);
-        let lines = cell.display_lines(/*width*/ 100);
-
-        assert!(
-            lines.iter().any(|line| line
-                .spans
-                .iter()
-                .any(|span| span.content.as_ref() == "fn" && span.style.fg.is_some())),
-            "expected Rust keyword in read output to be syntax highlighted: {lines:?}"
-        );
-    }
-
-    #[test]
-    fn search_output_highlights_result_code_by_path_extension() {
-        let call = ExecCall {
-            call_id: "call-id".to_string(),
-            command: vec!["bash".into(), "-lc".into(), "rg 'fn main' src".into()],
-            parsed: vec![ParsedCommand::Search {
-                cmd: "rg 'fn main' src".into(),
-                query: Some("fn main".into()),
-                path: Some("src".into()),
-            }],
-            output: Some(CommandOutput::new(
-                /*exit_code*/ 0,
-                r"C:\src\main.rs:12:fn main() {".to_string(),
-            )),
-            source: ExecCommandSource::Agent,
-            start_time: None,
-            duration: None,
-            interaction_input: None,
-        };
-
-        let cell = ExecCell::new(call, /*animations_enabled*/ false);
-        let lines = cell.display_lines(/*width*/ 100);
-
-        assert!(
-            lines.iter().any(|line| line
-                .spans
-                .iter()
-                .any(|span| span.content.as_ref() == "fn" && span.style.fg.is_some())),
-            "expected rg result code to be syntax highlighted by file extension: {lines:?}"
         );
     }
 

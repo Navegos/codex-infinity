@@ -18,7 +18,7 @@ pub fn is_dangerous_command_windows(command: &[String]) -> bool {
     is_direct_gui_launch(command)
 }
 
-fn is_dangerous_powershell(command: &[String]) -> bool {
+pub(crate) fn is_dangerous_powershell(command: &[String]) -> bool {
     let Some((exe, rest)) = command.split_first() else {
         return false;
     };

@@ -64,10 +64,9 @@ async fn misalignment_policy_failure_stops_the_thread_and_renders_once() {
         }),
         /*replay_kind*/ None,
     );
-    assert!(
-        render_bottom_popup(&chat, /*width*/ 80)
-            .contains("Giving this request a little extra thought")
-    );
+    // Fork: no safety-buffering interstitial UI; buffering only marks state.
+    assert!(!render_bottom_popup(&chat, /*width*/ 80).contains("Giving this request"));
+    assert!(chat.safety_buffering_is_waiting());
     chat.queue_user_message(UserMessage::from("queued follow-up"));
     chat.bottom_pane
         .set_composer_text("stale draft".to_string(), Vec::new(), Vec::new());

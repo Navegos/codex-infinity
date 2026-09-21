@@ -3,6 +3,7 @@ use crate::provider::Provider;
 use crate::requests::headers::build_session_headers;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::models::ImageReference;
 use codex_protocol::models::ReasoningItemContent;
 use codex_protocol::models::ResponseItem;
 use http::HeaderMap;
@@ -70,12 +71,14 @@ impl<'a> ChatRequestBuilder<'a> {
                                 text.push_str(value);
                                 parts.push(json!({"type": "text", "text": value}));
                             }
-                            ContentItem::InputImage { image_url, .. } => {
-                                multimodal = true;
-                                parts.push(json!({
-                                    "type": "image_url",
-                                    "image_url": {"url": image_url}
-                                }));
+                            ContentItem::InputImage { image, .. } => {
+                                if let ImageReference::Inline { image_url } = image {
+                                    multimodal = true;
+                                    parts.push(json!({
+                                        "type": "image_url",
+                                        "image_url": {"url": image_url}
+                                    }));
+                                }
                             }
                             ContentItem::InputAudio { .. } => {}
                         }

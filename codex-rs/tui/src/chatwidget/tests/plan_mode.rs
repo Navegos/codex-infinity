@@ -8,7 +8,10 @@ fn paste_hidden_plan_shell_payload(chat: &mut ChatWidget) -> String {
     chat.handle_paste(payload.clone());
     assert_eq!(
         chat.bottom_pane.composer_text(),
-        format!("/plan [Pasted Content {} chars]", payload.len())
+        format!(
+            "/plan {}",
+            crate::bottom_pane::large_paste_placeholder(&payload)
+        )
     );
     payload
 }

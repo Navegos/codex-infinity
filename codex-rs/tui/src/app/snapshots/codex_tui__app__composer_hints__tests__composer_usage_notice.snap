@@ -1,6 +1,5 @@
 ---
 source: tui/src/app/composer_hints_tests.rs
-assertion_line: 87
 expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 ---
 80 columns, running=false
@@ -19,7 +18,7 @@ Conversation
   5% of your 5h limit left.
   Run /status for a breakdown.
       ⚠ 5h limit: only <1% left
-• Working (0s • esc to interrup…
+Working (0s • esc to interrupt)
 
 
 › draft stays
@@ -31,7 +30,7 @@ Conversation
   Run /status for
   a breakdown.
      ⚠ 5h 5% left
-• Working (0s • e…
+Working (0s • esc…
 
 
 › draft stays

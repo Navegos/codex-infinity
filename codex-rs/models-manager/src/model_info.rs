@@ -153,7 +153,6 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
     };
     if is_deepseek {
         model.description = Some("DeepSeek V4 native API model".into());
-        model.supports_parallel_tool_calls = true;
     }
     model
 }

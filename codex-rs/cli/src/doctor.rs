@@ -1865,7 +1865,10 @@ fn multiplexer_name(multiplexer: &Multiplexer) -> String {
             Some(version) => format!("tmux {version}"),
             None => "tmux".to_string(),
         },
-        Multiplexer::Zellij {} => "zellij".to_string(),
+        Multiplexer::Zellij { version } => match version {
+            Some(version) => format!("zellij {version}"),
+            None => "zellij".to_string(),
+        },
     }
 }
 

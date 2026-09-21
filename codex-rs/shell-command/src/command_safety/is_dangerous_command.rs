@@ -86,7 +86,7 @@ pub fn dangerous_powershell_words_match(
     platform: DangerousCommandPlatform,
 ) -> Option<DangerousCommandMatch> {
     if platform == DangerousCommandPlatform::Windows {
-        windows_dangerous_commands::is_dangerous_powershell_words(command)
+        windows_dangerous_commands::is_dangerous_powershell(command)
             .then_some(DangerousCommandMatch::Other)
     } else {
         None

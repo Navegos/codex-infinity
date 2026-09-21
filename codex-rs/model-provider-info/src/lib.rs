@@ -565,6 +565,8 @@ other non-default provider fields are not supported"
         ModelProviderInfo {
             name: DEEPSEEK_PROVIDER_NAME.into(),
             base_url: Some(DEEPSEEK_BASE_URL.into()),
+            model_catalog_url: None,
+            gateway_oauth: None,
             env_key: Some("DEEPSEEK_API_KEY".into()),
             env_key_instructions: Some(
                 "Create an API key at https://platform.deepseek.com/api_keys and export DEEPSEEK_API_KEY."

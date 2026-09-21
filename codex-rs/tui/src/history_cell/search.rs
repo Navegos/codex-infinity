@@ -41,7 +41,9 @@ pub(crate) struct WebSearchCell {
     call_id: String,
     query: String,
     action: Option<WebSearchAction>,
+    start_time: Instant,
     completed: bool,
+    animations_enabled: bool,
 }
 
 impl WebSearchCell {
@@ -49,13 +51,15 @@ impl WebSearchCell {
         call_id: String,
         query: String,
         action: Option<WebSearchAction>,
-        _animations_enabled: bool,
+        animations_enabled: bool,
     ) -> Self {
         Self {
             call_id,
             query,
             action,
+            start_time: Instant::now(),
             completed: false,
+            animations_enabled,
         }
     }
 

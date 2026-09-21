@@ -26,8 +26,6 @@ use crate::key_hint::ShortcutHint;
 use crate::line_truncation::line_width;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use crate::motion::MotionMode;
-use crate::motion::ReducedMotionIndicator;
-use crate::motion::activity_indicator;
 use crate::render::renderable::Renderable;
 use crate::text_formatting::capitalize_first;
 use crate::tui::FrameRequester;
@@ -227,20 +225,11 @@ impl StatusIndicator<'_> {
             |started_at| now.saturating_duration_since(started_at),
         );
         let pretty_elapsed = fmt_elapsed_compact(elapsed_duration.as_secs());
-        let progress =
-            MotionMode::from_animations_enabled(row.animations_enabled && row.effects.progress);
         let shimmer =
             MotionMode::from_animations_enabled(row.animations_enabled && row.effects.shimmer);
 
+        // Fork: bullet-less status line; the activity indicator is never shown.
         let mut spans = Vec::with_capacity(5);
-        if let Some(indicator) = activity_indicator(
-            Some(self.timer.last_resume_at),
-            progress,
-            ReducedMotionIndicator::Hidden,
-        ) {
-            spans.push(indicator);
-            spans.push(" ".into());
-        }
         spans.extend(summary_shimmer(
             &row.header,
             now.saturating_duration_since(row.header_started_at),
