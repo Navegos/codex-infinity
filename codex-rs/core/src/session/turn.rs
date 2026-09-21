@@ -33,6 +33,7 @@ use crate::responses_metadata::CodexResponsesRequestKind;
 use crate::responses_retry::ResponsesStreamRequest;
 use crate::responses_retry::ResponsesStreamRetryState;
 use crate::responses_retry::handle_response_stream_error;
+use crate::responses_retry::wait_for_server_overload_retry;
 use crate::responses_retry::wait_for_usage_limit_reset_if_applicable;
 use crate::session::PreviousTurnSettings;
 use crate::session::TurnInput;
@@ -1668,6 +1669,17 @@ async fn run_sampling_request(
                         sess.update_rate_limits(&turn_context, *rate_limits).await;
                     }
                     wait_for_usage_limit_reset_if_applicable(
+                        sess.as_ref(),
+                        turn_context.as_ref(),
+                        err,
+                        &cancellation_token,
+                    )
+                    .await?;
+                    continue;
+                }
+                CodexErrorDetails::ServerOverloaded => {
+                    wait_for_server_overload_retry(
+                        &mut retry_state,
                         sess.as_ref(),
                         turn_context.as_ref(),
                         err,
