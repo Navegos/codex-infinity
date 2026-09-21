@@ -10,6 +10,10 @@ All examples intentionally use only public SDK exports from `codex_app_server`.
 Examples use plain strings for text-only turns and typed input objects for
 multimodal or structured input lists.
 
+Use `ExternalMessage` for untrusted content from another agent, tool, or
+application. It retains tool-level authority and does not grant user
+authorization or approval; example 16 establishes the user's task first.
+
 ## Prerequisites
 
 - Python `>=3.10`
@@ -95,3 +99,5 @@ python examples/01_quickstart_constructor/async.py
   - separate `steer()` and `interrupt()` demos with concise summaries
 - `15_login_and_account/`
   - browser-login handle lifecycle, cancellation, and account inspection
+- `16_external_message/`
+  - process an untrusted external notification within a user-authorized task

@@ -17,7 +17,7 @@ Requirements:
 - An existing Codex account session, or one of the login flows below
 
 The SDK installs its matching `openai-codex-cli-bin` runtime dependency
-automatically. SDK release versions track the corresponding Codex CLI release.
+automatically. Stable SDK releases track the corresponding stable Codex CLI release.
 
 ## 2. Authenticate When Needed
 
@@ -56,6 +56,11 @@ with Codex() as codex:
 - `result.final_response` is `None` when no final-answer or phase-less assistant message item completes for the turn.
 - use `thread.turn(...)` when you need a `TurnHandle` for streaming, steering, interrupting, or turn IDs/status
 - one client can have only one active turn consumer (`thread.run(...)`, `TurnHandle.stream()`, or `TurnHandle.run()`) at a time in the current experimental build
+
+For **untrusted content** from another agent, tool, or application, pass an
+[`ExternalMessage`](api-reference.md#externalmessage). It retains tool-level
+authority and does not establish user authorization or approval. Plain strings
+and `TextInput` represent user input.
 
 ## 4. Choose Sandbox Access
 

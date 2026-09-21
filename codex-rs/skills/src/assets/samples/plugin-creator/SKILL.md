@@ -42,7 +42,26 @@ python3 .agents/skills/plugin-creator/scripts/create_basic_plugin.py my-plugin -
   --with-skills --with-hooks --with-scripts --with-assets --with-mcp --with-apps --with-marketplace
 ```
 
-`<parent-plugin-directory>` is the directory where the plugin folder `<plugin-name>` will be created (for example `~/code/plugins`).
+`<parent-plugin-directory>` is the directory where the plugin folder `<plugin-name>` will be
+created (for example `~/plugins`).
+
+5. Before handing back a generated plugin, run:
+
+```bash
+python3 scripts/validate_plugin.py <plugin-path>
+```
+
+For updates to an existing local plugin during development, keep the scaffold flow as-is and use the
+reference instead of hand-editing marketplace files:
+
+```bash
+python3 scripts/read_marketplace_name.py
+python3 scripts/update_plugin_cachebuster.py <plugin-path>
+```
+
+For a repo/team marketplace, pass `--marketplace-path <marketplace-json-path>` to the first command.
+Prefer the helper default cachebuster unless the user explicitly asks for a specific override.
+See `references/installing-and-updating.md` for the expected cachebuster and reinstall flow while iterating on an existing local plugin.
 
 ## What this skill creates
 
@@ -67,9 +86,23 @@ python3 .agents/skills/plugin-creator/scripts/create_basic_plugin.py my-plugin -
 
 ## Marketplace workflow
 
-- `marketplace.json` always lives at `<repo-root>/.agents/plugins/marketplace.json`.
-- For a home-local plugin, use the same convention with `<home>` as the root:
-  `~/.agents/plugins/marketplace.json` plus `./plugins/<plugin-name>`.
+- Personal-marketplace creation defaults to `~/.agents/plugins/marketplace.json`. Here,
+  "personal marketplace" means the marketplace whose file is at that path.
+- Repo/team marketplace creation is opt-in through both `--path` and `--marketplace-path`, only
+  when the user specifically requests it.
+- `--marketplace-name` is an exception path. Use it only when the default `personal` marketplace
+  name is already taken and you need to seed a different new marketplace file.
+- Do not use `--marketplace-name` to rename an existing marketplace file in place. If the file
+  already exists, its top-level `name` must already match.
+- If the user specifies a different marketplace path, treat that marketplace as needing explicit installation via `codex plugin marketplace add`.
+- Plugin names must match `[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*`.
+- Marketplace names must match `[A-Za-z0-9_-]+`.
+- For existing marketplaces, always validate names with `scripts/read_marketplace_name.py`; stop if
+  validation fails. With no argument it reads the default personal marketplace; with an explicit
+  path it works for repo/team marketplaces too. The scaffold validates new marketplaces itself.
+- Before updating existing plugins, validate both identifiers before changing files or constructing
+  install commands.
+- In either location, the generated source path remains `./plugins/<plugin-name>`.
 - Marketplace root metadata supports top-level `name` plus optional `interface.displayName`.
 - Treat plugin order in `plugins[]` as render order in Codex. Append new entries unless a user explicitly asks to reorder the list.
 - `displayName` belongs inside the marketplace `interface` object, not individual `plugins[]` entries.

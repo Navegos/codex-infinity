@@ -6,6 +6,7 @@
 use super::*;
 use codex_app_server_protocol::ModelSafetyBufferingUpdatedNotification;
 
+const SAFETY_BUFFERING_PROMPT_VIEW_ID: &str = "safety-buffering-prompt";
 #[derive(Debug)]
 struct ActiveSafetyBuffering {
     turn_id: String,
@@ -27,8 +28,13 @@ impl ChatWidget {
     }
 
     pub(super) fn mark_safety_buffering_agent_message_started(&mut self) {
-        if let Some(active) = self.safety_buffering.active.as_mut() {
+        if let Some(active) = self.safety_buffering.active.as_mut()
+            && !active.agent_message_started
+        {
             active.agent_message_started = true;
+            self.bottom_pane
+                .dismiss_view_by_id(SAFETY_BUFFERING_PROMPT_VIEW_ID);
+            self.restore_reasoning_status_header();
         }
     }
 
@@ -52,6 +58,11 @@ impl ChatWidget {
         if matches!(replay_kind, Some(ReplayKind::ResumeInitialMessages))
             || !self.turn_lifecycle.agent_turn_running
             || self.turn_lifecycle.last_turn_id.as_deref() != Some(turn_id.as_str())
+            || self
+                .safety_buffering
+                .active
+                .as_ref()
+                .is_some_and(|active| active.turn_id == turn_id && active.agent_message_started)
         {
             return;
         }

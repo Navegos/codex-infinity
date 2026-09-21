@@ -9,14 +9,13 @@ from _bootstrap import ensure_local_sdk_src, runtime_config
 
 ensure_local_sdk_src()
 
-from codex_app_server import (
-    AskForApproval,
+from openai_codex import (
     Codex,
-    Personality,
+    Sandbox,
+)
+from openai_codex.types import (
     ReasoningEffort,
     ReasoningSummary,
-    SandboxPolicy,
-    TextInput,
 )
 
 REASONING_RANK = {
@@ -26,21 +25,18 @@ REASONING_RANK = {
     "medium": 3,
     "high": 4,
     "xhigh": 5,
+    "max": 6,
+    "ultra": 7,
 }
 
 
 def _pick_highest_model(models):
-    visible = [m for m in models if not m.hidden] or models
-    preferred = next(
-        (m for m in visible if m.model == PREFERRED_MODEL or m.id == PREFERRED_MODEL),
-        None,
-    )
-    if preferred is not None:
-        return preferred
+    visible = [m for m in models if not m.hidden]
+    if not visible:
+        raise RuntimeError("models response did not include visible models")
+
     known_names = {m.id for m in visible} | {m.model for m in visible}
-    top_candidates = [
-        m for m in visible if not (m.upgrade and m.upgrade in known_names)
-    ]
+    top_candidates = [m for m in visible if not (m.upgrade and m.upgrade in known_names)]
     if not top_candidates:
         raise RuntimeError("models response did not include top-level visible models")
     return max(top_candidates, key=lambda m: (m.model, m.id))
@@ -48,9 +44,7 @@ def _pick_highest_model(models):
 
 def _pick_highest_turn_effort(model) -> ReasoningEffort:
     if not model.supported_reasoning_efforts:
-        raise RuntimeError(
-            f"{model.model} did not advertise supported reasoning efforts"
-        )
+        raise RuntimeError(f"{model.model} did not advertise supported reasoning efforts")
 
     best = max(
         model.supported_reasoning_efforts,
@@ -71,15 +65,6 @@ OUTPUT_SCHEMA = {
     "required": ["summary", "actions"],
     "additionalProperties": False,
 }
-
-SANDBOX_POLICY = SandboxPolicy.model_validate(
-    {
-        "type": "readOnly",
-        "access": {"type": "fullAccess"},
-    }
-)
-APPROVAL_POLICY = AskForApproval.model_validate("never")
-
 
 with Codex(config=runtime_config()) as codex:
     models = codex.models(include_hidden=True)
@@ -104,13 +89,11 @@ with Codex(config=runtime_config()) as codex:
     print("items:", len(first.items))
 
     second = thread.turn(
-        TextInput("Return JSON for a safe feature-flag rollout plan."),
-        approval_policy=APPROVAL_POLICY,
+        "Return JSON for a safe feature-flag rollout plan.",
         cwd=str(Path.cwd()),
         effort=selected_effort,
         model=selected_model.model,
         output_schema=OUTPUT_SCHEMA,
-        personality=Personality.pragmatic,
         sandbox=Sandbox.read_only,
         summary=ReasoningSummary.model_validate("concise"),
     ).run()

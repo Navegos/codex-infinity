@@ -12,10 +12,8 @@ updates:
       - codex-rs/*
     schedule:
       interval: weekly
-  - package-ecosystem: devcontainers
-    directory: /
-    schedule:
-      interval: weekly
+    cooldown:
+      default-days: 7
   - package-ecosystem: docker
     directory: codex-cli
     schedule:

@@ -2,6 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use codex_exec_server::ExecutorFileSystem;
+use codex_exec_server::FileSystemEnvironmentAccessor;
+use codex_exec_server::GetMetadataOptions;
+use codex_exec_server::ReadFileOptions;
 use codex_protocol::protocol::SkillScope;
 use codex_skills::ParsedSkillFrontmatter;
 use codex_skills::SkillError;
@@ -33,10 +36,10 @@ use super::metadata::validate_len;
 use super::namespace::SkillNamespaceResolver;
 
 /// A resolved host skill root ready for filesystem discovery.
-pub struct HostSkillRoot {
-    pub path: AbsolutePathBuf,
-    pub scope: SkillScope,
-    pub file_system: Arc<dyn ExecutorFileSystem>,
+pub(crate) struct HostSkillRoot {
+    pub(crate) path: AbsolutePathBuf,
+    pub(crate) scope: SkillScope,
+    pub(crate) file_system: Arc<dyn ExecutorFileSystem>,
     plugin: Option<PluginSkillRootContext>,
 }
 
@@ -76,7 +79,7 @@ impl HostSkillRoot {
     }
 
     /// Returns the owning plugin identity when this root belongs to a plugin.
-    pub fn plugin_identity(&self) -> Option<&PluginIdentity> {
+    pub(crate) fn plugin_identity(&self) -> Option<&PluginIdentity> {
         self.plugin.as_ref().map(|plugin| &plugin.identity)
     }
 
@@ -109,13 +112,13 @@ impl HostSkillRoot {
 
 /// Skills and errors loaded from one canonical host root.
 #[derive(Clone)]
-pub struct HostSkillRootSnapshot {
-    pub root: AbsolutePathBuf,
-    pub skills: Vec<SkillMetadata>,
-    pub skill_discovery_path_by_path: Arc<HashMap<AbsolutePathBuf, AbsolutePathBuf>>,
-    pub errors: Vec<SkillError>,
-    pub file_system: Arc<dyn ExecutorFileSystem>,
-    pub is_agent_plugin: bool,
+pub(crate) struct HostSkillRootSnapshot {
+    pub(crate) root: AbsolutePathBuf,
+    pub(crate) skills: Vec<SkillMetadata>,
+    pub(crate) skill_discovery_path_by_path: Arc<HashMap<AbsolutePathBuf, AbsolutePathBuf>>,
+    pub(crate) errors: Vec<SkillError>,
+    pub(crate) file_system: Arc<dyn ExecutorFileSystem>,
+    pub(crate) is_agent_plugin: bool,
 }
 
 struct ResolvedDiscoveredSkill {
@@ -124,7 +127,7 @@ struct ResolvedDiscoveredSkill {
     path_uri: PathUri,
 }
 
-pub async fn load_host_skill_root(root: HostSkillRoot) -> HostSkillRootSnapshot {
+pub(crate) async fn load_host_skill_root(root: HostSkillRoot) -> HostSkillRootSnapshot {
     let is_agent_plugin = root.discovery_mode() == SkillDiscoveryMode::DirectChildren;
     let canonical_root =
         canonicalize_for_skill_identity(root.file_system.as_ref(), &root.path).await;
@@ -149,6 +152,9 @@ async fn load_skills_under_root(
     Vec<SkillError>,
 ) {
     let file_system = skill_root.file_system.as_ref();
+    // TODO(anp): Bind discovery to turn permissions when host skill roots accept an accessor;
+    // until then, keep using the same unrestricted filesystem that supplied the root.
+    let discovery_access = FileSystemEnvironmentAccessor::unrestricted(&skill_root.file_system);
     let plugin_identity = skill_root.plugin_identity();
     let plugin_root = match skill_root.plugin_root() {
         Some(plugin_root) => Some(canonicalize_for_skill_identity(file_system, plugin_root).await),
@@ -165,7 +171,7 @@ async fn load_skills_under_root(
         mut namespace_roots,
         warnings,
     } = discover_skills(
-        file_system,
+        &discovery_access,
         &PathUri::from_abs_path(root),
         SkillDiscoveryOptions {
             directory_symlinks,
@@ -219,7 +225,14 @@ async fn load_skills_under_root(
                     );
                     return None;
                 }
-                match file_system.get_metadata(&path_uri, /*sandbox*/ None).await {
+                match file_system
+                    .get_metadata(
+                        &path_uri,
+                        GetMetadataOptions::default(),
+                        /*sandbox*/ None,
+                    )
+                    .await
+                {
                     Ok(metadata) if metadata.is_file => {}
                     Ok(_) => {
                         error!(
@@ -261,7 +274,7 @@ async fn load_skills_under_root(
             Some(namespace) => SkillNamespaceResolver::with_provided_namespace(namespace),
             None => {
                 SkillNamespaceResolver::discover(
-                    file_system,
+                    &discovery_access,
                     &root_uri,
                     &skill_paths,
                     plugin_roots,
@@ -348,7 +361,7 @@ async fn parse_skill_file(
     }
     .unwrap_or(SkillMetadataDiscovery::Absent);
     let (contents, loaded_metadata) = tokio::join!(
-        file_system.read_file_text(path_uri, /*sandbox*/ None),
+        file_system.read_file_text(path_uri, ReadFileOptions::default(), /*sandbox*/ None,),
         load_host_skill_metadata(file_system, path, &metadata, plugin_root),
     );
     let contents = contents.map_err(|error| format!("failed to read file: {error}"))?;

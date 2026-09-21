@@ -6,20 +6,32 @@ import threading
 import uuid
 from _thread import LockType
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable, Iterator, TypeVar
+from typing import Callable, Iterator, TypeVar
 
 from pydantic import BaseModel
 
-from .errors import AppServerError, TransportClosedError, map_jsonrpc_error
+from ._goal import _GoalOperationState
+from ._initialize_metadata import _split_user_agent
+from ._message_router import MessageRouter, _TurnSubscription
+from ._runtime_requirements import CheckoutCapabilities, require_runtime_version
+from ._version import __version__ as SDK_VERSION
+from .errors import CodexError, InvalidRequestError, TransportClosedError
 from .generated.notification_registry import NOTIFICATION_MODELS
 from .generated.v2_all import (
     AccountLoginCompletedNotification,
     AgentMessageDeltaNotification,
+    CancelLoginAccountResponse,
+    ChatgptDeviceCodeLoginAccountResponse,
+    ChatgptLoginAccountResponse,
     GetAccountParams as V2GetAccountParams,
+    GetAccountResponse,
     IdleThreadStatus,
     LoginAccountParams as V2LoginAccountParams,
+    LoginAccountResponse,
+    LogoutAccountResponse,
     ModelListResponse,
     ThreadArchiveResponse,
     ThreadCompactStartResponse,
@@ -51,7 +63,6 @@ from .models import (
     UnknownNotification,
 )
 from .retry import retry_on_overload
-from ._version import __version__ as SDK_VERSION
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 ApprovalHandler = Callable[[str, JsonObject | None], JsonObject]
@@ -96,9 +107,7 @@ def _params_dict(
         return dumped
     if isinstance(params, dict):
         return params
-    raise TypeError(
-        f"Expected generated params model or dict, got {type(params).__name__}"
-    )
+    raise TypeError(f"Expected generated params model or dict, got {type(params).__name__}")
 
 
 def _installed_codex_path() -> Path:
@@ -138,9 +147,7 @@ def _prepend_path_dirs(env: dict[str, str], path_dirs: tuple[Path, ...]) -> None
     existing_path = env.get(path_key, "")
     path_dir_values = [str(path_dir) for path_dir in path_dirs]
     existing_entries = [
-        entry
-        for entry in existing_path.split(path_sep)
-        if entry and entry not in path_dir_values
+        entry for entry in existing_path.split(path_sep) if entry and entry not in path_dir_values
     ]
     env[path_key] = path_sep.join([*path_dir_values, *existing_entries])
 
@@ -216,11 +223,14 @@ class CodexClient:
         self._approval_handler = approval_handler or self._default_approval_handler
         self._proc: subprocess.Popen[str] | None = None
         self._lock = threading.Lock()
-        self._turn_consumer_lock = threading.Lock()
-        self._active_turn_consumer: str | None = None
-        self._pending_notifications: deque[Notification] = deque()
+        self._thread_start_locks_guard = threading.Lock()
+        self._thread_start_locks: dict[str, _ThreadStartLock] = {}
+        self._router = MessageRouter()
         self._stderr_lines: deque[str] = deque(maxlen=400)
         self._stderr_thread: threading.Thread | None = None
+        self._reader_thread: threading.Thread | None = None
+        self._runtime_version: str | None = None
+        self._checkout_capabilities: CheckoutCapabilities | None = None
 
     def __enter__(self) -> "CodexClient":
         self.start()
@@ -250,6 +260,11 @@ class CodexClient:
             env.update(self.config.env)
         _prepend_path_dirs(env, path_dirs)
 
+        if self.config.launch_args_override is None:
+            self._checkout_capabilities = CheckoutCapabilities(
+                command=tuple(args[:-2]), cwd=self.config.cwd, env=env.copy()
+            )
+
         self._proc = subprocess.Popen(
             args,
             stdin=subprocess.PIPE,
@@ -263,13 +278,15 @@ class CodexClient:
         )
 
         self._start_stderr_drain_thread()
+        self._start_reader_thread()
 
     def close(self) -> None:
+        self._runtime_version = None
+        self._checkout_capabilities = None
         if self._proc is None:
             return
         proc = self._proc
         self._proc = None
-        self._active_turn_consumer = None
 
         if proc.stdin:
             proc.stdin.close()
@@ -281,8 +298,11 @@ class CodexClient:
 
         if self._stderr_thread and self._stderr_thread.is_alive():
             self._stderr_thread.join(timeout=0.5)
+        if self._reader_thread and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=0.5)
 
     def initialize(self) -> InitializeResponse:
+        self._runtime_version = None
         result = self.request(
             "initialize",
             {
@@ -297,6 +317,10 @@ class CodexClient:
             },
             response_model=InitializeResponse,
         )
+        version = result.serverInfo.version if result.serverInfo is not None else None
+        if not version or not version.strip():
+            _, version = _split_user_agent(result.userAgent or "")
+        self._runtime_version = version.split()[0] if version and version.strip() else None
         self.notify("initialized", None)
         return result
 
@@ -307,76 +331,149 @@ class CodexClient:
         *,
         response_model: type[ModelT],
     ) -> ModelT:
+        runtime_fields = {
+            "turn/start": ("toolOutput", "turnTrigger", "serviceTierForTurn"),
+            "thread/resume": ("excludeTurns",),
+            "thread/fork": ("excludeTurns",),
+        }
+        supplied_fields = [
+            field
+            for field in runtime_fields.get(method, ())
+            if (params or {}).get(field) is not None
+        ]
+        if supplied_fields:
+            try:
+                if self._runtime_version == "0.0.0":
+                    if self._checkout_capabilities is None:
+                        raise ValueError(
+                            "Cannot verify an unversioned CLI with a custom launch command"
+                        )
+                    supported = self._checkout_capabilities.fields[method]
+                    if missing := set(supplied_fields) - supported:
+                        raise ValueError(
+                            f"The checkout does not support {', '.join(sorted(missing))}"
+                        )
+                else:
+                    require_runtime_version(self._runtime_version)
+            except ValueError as exc:
+                raise CodexError(
+                    f"{method} with {', '.join(supplied_fields)}: {exc}. "
+                    "Configure CodexConfig.codex_bin with a supported CLI."
+                ) from exc
         result = self._request_raw(method, params)
         if not isinstance(result, dict):
             raise CodexError(f"{method} response must be a JSON object")
         return response_model.model_validate(result)
 
     def _request_raw(self, method: str, params: JsonObject | None = None) -> JsonValue:
+        """Send a JSON-RPC request and wait for the reader thread to route its response."""
         request_id = str(uuid.uuid4())
-        self._write_message(
-            {"id": request_id, "method": method, "params": params or {}}
-        )
+        waiter = self._router.create_response_waiter(request_id)
 
-        while True:
-            msg = self._read_message()
+        try:
+            message: JsonObject = {"id": request_id, "method": method}
+            if params is not None:
+                message["params"] = params
+            self._write_message(message)
+        except BaseException:
+            self._router.discard_response_waiter(request_id)
+            raise
 
-            if "method" in msg and "id" in msg:
-                response = self._handle_server_request(msg)
-                self._write_message({"id": msg["id"], "result": response})
-                continue
-
-            if "method" in msg and "id" not in msg:
-                self._pending_notifications.append(
-                    self._coerce_notification(msg["method"], msg.get("params"))
-                )
-                continue
-
-            if msg.get("id") != request_id:
-                continue
-
-            if "error" in msg:
-                err = msg["error"]
-                if isinstance(err, dict):
-                    raise map_jsonrpc_error(
-                        int(err.get("code", -32000)),
-                        str(err.get("message", "unknown")),
-                        err.get("data"),
-                    )
-                raise AppServerError("Malformed JSON-RPC error response")
-
-            return msg.get("result")
+        item = waiter.get()
+        if isinstance(item, BaseException):
+            raise item
+        return item
 
     def notify(self, method: str, params: JsonObject | None = None) -> None:
-        self._write_message({"method": method, "params": params or {}})
+        """Send a JSON-RPC notification without waiting for a response."""
+        message: JsonObject = {"method": method}
+        if params is not None:
+            message["params"] = params
+        self._write_message(message)
 
     def next_notification(self) -> Notification:
-        if self._pending_notifications:
-            return self._pending_notifications.popleft()
+        """Return the next notification that is not scoped to an active turn."""
+        return self._router.next_global_notification()
 
-        while True:
-            msg = self._read_message()
-            if "method" in msg and "id" in msg:
-                response = self._handle_server_request(msg)
-                self._write_message({"id": msg["id"], "result": response})
-                continue
-            if "method" in msg and "id" not in msg:
-                return self._coerce_notification(msg["method"], msg.get("params"))
+    def register_login_notifications(self, login_id: str) -> None:
+        """Start routing notifications for one interactive login attempt."""
+        self._router.register_login(login_id)
 
-    def acquire_turn_consumer(self, turn_id: str) -> None:
-        with self._turn_consumer_lock:
-            if self._active_turn_consumer is not None:
-                raise RuntimeError(
-                    "Concurrent turn consumers are not yet supported in the experimental SDK. "
-                    f"Client is already streaming turn {self._active_turn_consumer!r}; "
-                    f"cannot start turn {turn_id!r} until the active consumer finishes."
-                )
-            self._active_turn_consumer = turn_id
+    def unregister_login_notifications(self, login_id: str) -> None:
+        """Stop routing notifications for one interactive login attempt."""
+        self._router.unregister_login(login_id)
 
-    def release_turn_consumer(self, turn_id: str) -> None:
-        with self._turn_consumer_lock:
-            if self._active_turn_consumer == turn_id:
-                self._active_turn_consumer = None
+    def next_login_notification(self, login_id: str) -> Notification:
+        """Return the next routed notification for the requested login id."""
+        return self._router.next_login_notification(login_id)
+
+    def _subscribe_turn_notifications(self, turn_id: str) -> _TurnSubscription:
+        return self._router.subscribe_turn(turn_id)
+
+    def register_turn_notifications(self, turn_id: str) -> None:
+        """Start routing notifications for one turn into its dedicated queue."""
+        self._router.register_turn(turn_id)
+
+    def unregister_turn_notifications(self, turn_id: str) -> None:
+        """Stop routing notifications for one turn into its dedicated queue."""
+        self._router.unregister_turn(turn_id)
+
+    def next_turn_notification(self, turn_id: str) -> Notification:
+        """Return the next routed notification for the requested turn id."""
+        return self._router.next_turn_notification(turn_id)
+
+    def register_goal_operation(self, thread_id: str) -> _GoalOperationState:
+        """Register a private thread-scoped route for a logical goal turn."""
+        return self._router.register_goal(thread_id)
+
+    def reserve_goal_operation(self, thread_id: str) -> _GoalOperationState:
+        """Reserve a private thread route before replacing its stored goal."""
+        return self._router.reserve_goal(thread_id)
+
+    def unregister_goal_operation(self, state: _GoalOperationState) -> None:
+        """Release routing state for one logical goal turn."""
+        self._router.unregister_goal(state)
+
+    def next_goal_notification(self, state: _GoalOperationState) -> Notification:
+        """Wait for the next notification in a logical goal turn."""
+        return state.next_notification()
+
+    def account_login_start(
+        self,
+        params: V2LoginAccountParams | JsonObject,
+    ) -> LoginAccountResponse:
+        response = self.request(
+            "account/login/start",
+            _params_dict(params),
+            response_model=LoginAccountResponse,
+        )
+        response_root = response.root
+        if isinstance(
+            response_root,
+            ChatgptLoginAccountResponse | ChatgptDeviceCodeLoginAccountResponse,
+        ):
+            self.register_login_notifications(response_root.login_id)
+        return response
+
+    def account_login_cancel(self, login_id: str) -> CancelLoginAccountResponse:
+        return self.request(
+            "account/login/cancel",
+            {"loginId": login_id},
+            response_model=CancelLoginAccountResponse,
+        )
+
+    def account_read(
+        self,
+        params: V2GetAccountParams | JsonObject | None = None,
+    ) -> GetAccountResponse:
+        return self.request(
+            "account/read",
+            _params_dict(params),
+            response_model=GetAccountResponse,
+        )
+
+    def account_logout(self) -> LogoutAccountResponse:
+        return self.request("account/logout", None, response_model=LogoutAccountResponse)
 
     def thread_start(
         self, params: V2ThreadStartParams | JsonObject | None = None
@@ -391,20 +488,14 @@ class CodexClient:
         params: V2ThreadResumeParams | JsonObject | None = None,
     ) -> ThreadResumeResponse:
         payload = {"threadId": thread_id, **_params_dict(params)}
-        return self.request(
-            "thread/resume", payload, response_model=ThreadResumeResponse
-        )
+        return self.request("thread/resume", payload, response_model=ThreadResumeResponse)
 
     def thread_list(
         self, params: V2ThreadListParams | JsonObject | None = None
     ) -> ThreadListResponse:
-        return self.request(
-            "thread/list", _params_dict(params), response_model=ThreadListResponse
-        )
+        return self.request("thread/list", _params_dict(params), response_model=ThreadListResponse)
 
-    def thread_read(
-        self, thread_id: str, include_turns: bool = False
-    ) -> ThreadReadResponse:
+    def thread_read(self, thread_id: str, include_turns: bool = False) -> ThreadReadResponse:
         return self.request(
             "thread/read",
             {"threadId": thread_id, "includeTurns": include_turns},
@@ -562,12 +653,50 @@ class CodexClient:
         input_items: list[JsonObject] | JsonObject | str,
         params: V2TurnStartParams | JsonObject | None = None,
     ) -> TurnStartResponse:
-        payload = {
-            **_params_dict(params),
-            "threadId": thread_id,
-            "input": self._normalize_input_items(input_items),
-        }
-        return self.request("turn/start", payload, response_model=TurnStartResponse)
+        """Start a turn and register its notification queue as early as possible."""
+        return self._start_turn(thread_id, input_items, params, for_handle=False)[0]
+
+    def _start_turn(
+        self,
+        thread_id: str,
+        input_items: list[JsonObject] | JsonObject | str,
+        params: V2TurnStartParams | JsonObject | None,
+        for_handle: bool,
+    ) -> tuple[TurnStartResponse, _TurnSubscription | None]:
+        with self._thread_start_lock(thread_id):
+            if self._router.has_goal(thread_id):
+                raise InvalidRequestError(
+                    -32600,
+                    f"thread has an active goal operation: {thread_id}",
+                )
+            payload = {
+                **_params_dict(params),
+                "threadId": thread_id,
+                "input": self._normalize_input_items(input_items),
+            }
+            with self._router.pending_turn(thread_id) as cursors:
+                started = self.request("turn/start", payload, response_model=TurnStartResponse)
+                subscription = self._router.prepare_turn(
+                    started.turn.id, thread_id, cursors, for_handle=for_handle
+                )
+                return started, subscription
+
+    @contextmanager
+    def _thread_start_lock(self, thread_id: str) -> Iterator[None]:
+        with self._thread_start_locks_guard:
+            entry = self._thread_start_locks.get(thread_id)
+            if entry is None:
+                entry = _ThreadStartLock()
+                self._thread_start_locks[thread_id] = entry
+            entry.users += 1
+        try:
+            with entry.lock:
+                yield
+        finally:
+            with self._thread_start_locks_guard:
+                entry.users -= 1
+                if entry.users == 0:
+                    self._thread_start_locks.pop(thread_id, None)
 
     def turn_interrupt(self, thread_id: str, turn_id: str) -> TurnInterruptResponse:
         return self.request(
@@ -617,23 +746,19 @@ class CodexClient:
         )
 
     def wait_for_turn_completed(self, turn_id: str) -> TurnCompletedNotification:
-        while True:
-            notification = self.next_notification()
-            if (
-                notification.method == "turn/completed"
-                and isinstance(notification.payload, TurnCompletedNotification)
-                and notification.payload.turn.id == turn_id
-            ):
-                return notification.payload
-
-    def stream_until_methods(self, methods: Iterable[str] | str) -> list[Notification]:
-        target_methods = {methods} if isinstance(methods, str) else set(methods)
-        out: list[Notification] = []
-        while True:
-            notification = self.next_notification()
-            out.append(notification)
-            if notification.method in target_methods:
-                return out
+        """Block on the routed turn stream until the matching completion arrives."""
+        self.register_turn_notifications(turn_id)
+        try:
+            while True:
+                notification = self.next_turn_notification(turn_id)
+                if (
+                    notification.method == "turn/completed"
+                    and isinstance(notification.payload, TurnCompletedNotification)
+                    and notification.payload.turn.id == turn_id
+                ):
+                    return notification.payload
+        finally:
+            self.unregister_turn_notifications(turn_id)
 
     def wait_for_login_completed(
         self,
@@ -646,9 +771,7 @@ class CodexClient:
                 notification = self.next_login_notification(login_id)
                 if (
                     notification.method == "account/login/completed"
-                    and isinstance(
-                        notification.payload, AccountLoginCompletedNotification
-                    )
+                    and isinstance(notification.payload, AccountLoginCompletedNotification)
                     and notification.payload.login_id == login_id
                 ):
                     return notification.payload
@@ -661,39 +784,40 @@ class CodexClient:
         text: str,
         params: V2TurnStartParams | JsonObject | None = None,
     ) -> Iterator[AgentMessageDeltaNotification]:
+        """Start a text turn and yield only its agent-message delta payloads."""
         started = self.turn_start(thread_id, text, params=params)
         turn_id = started.turn.id
-        while True:
-            notification = self.next_notification()
-            if (
-                notification.method == "item/agentMessage/delta"
-                and isinstance(notification.payload, AgentMessageDeltaNotification)
-                and notification.payload.turn_id == turn_id
-            ):
-                yield notification.payload
-                continue
-            if (
-                notification.method == "turn/completed"
-                and isinstance(notification.payload, TurnCompletedNotification)
-                and notification.payload.turn.id == turn_id
-            ):
-                break
+        self.register_turn_notifications(turn_id)
+        try:
+            while True:
+                notification = self.next_turn_notification(turn_id)
+                if (
+                    notification.method == "item/agentMessage/delta"
+                    and isinstance(notification.payload, AgentMessageDeltaNotification)
+                    and notification.payload.turn_id == turn_id
+                ):
+                    yield notification.payload
+                    continue
+                if (
+                    notification.method == "turn/completed"
+                    and isinstance(notification.payload, TurnCompletedNotification)
+                    and notification.payload.turn.id == turn_id
+                ):
+                    break
+        finally:
+            self.unregister_turn_notifications(turn_id)
 
     def _coerce_notification(self, method: str, params: object) -> Notification:
         params_dict = params if isinstance(params, dict) else {}
 
         model = NOTIFICATION_MODELS.get(method)
         if model is None:
-            return Notification(
-                method=method, payload=UnknownNotification(params=params_dict)
-            )
+            return Notification(method=method, payload=UnknownNotification(params=params_dict))
 
         try:
             payload = model.model_validate(params_dict)
         except Exception:  # noqa: BLE001
-            return Notification(
-                method=method, payload=UnknownNotification(params=params_dict)
-            )
+            return Notification(method=method, payload=UnknownNotification(params=params_dict))
         return Notification(method=method, payload=payload)
 
     def _normalize_input_items(
@@ -706,9 +830,8 @@ class CodexClient:
             return [input_items]
         return input_items
 
-    def _default_approval_handler(
-        self, method: str, params: JsonObject | None
-    ) -> JsonObject:
+    def _default_approval_handler(self, method: str, params: JsonObject | None) -> JsonObject:
+        """Accept approval requests when the caller did not provide a handler."""
         if method == "item/commandExecution/requestApproval":
             return {"decision": "accept"}
         if method == "item/fileChange/requestApproval":
@@ -728,6 +851,34 @@ class CodexClient:
 
         self._stderr_thread = threading.Thread(target=_drain, daemon=True)
         self._stderr_thread.start()
+
+    def _start_reader_thread(self) -> None:
+        """Start the sole stdout reader that fans messages into router queues."""
+        if self._proc is None or self._proc.stdout is None:
+            return
+
+        self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
+        self._reader_thread.start()
+
+    def _reader_loop(self) -> None:
+        """Continuously classify transport messages into requests, responses, and events."""
+        try:
+            while True:
+                msg = self._read_message()
+                if "method" in msg and "id" in msg:
+                    response = self._handle_server_request(msg)
+                    self._write_message({"id": msg["id"], "result": response})
+                    continue
+                if "method" in msg and "id" not in msg:
+                    method = msg["method"]
+                    if isinstance(method, str):
+                        self._router.route_notification(
+                            self._coerce_notification(method, msg.get("params"))
+                        )
+                    continue
+                self._router.route_response(msg)
+        except BaseException as exc:
+            self._router.fail_all(exc)
 
     def _stderr_tail(self, limit: int = 40) -> str:
         return "\n".join(list(self._stderr_lines)[-limit:])

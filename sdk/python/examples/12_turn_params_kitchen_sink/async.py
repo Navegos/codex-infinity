@@ -12,12 +12,11 @@ ensure_local_sdk_src()
 
 import asyncio
 
-from codex_app_server import (
-    AskForApproval,
+from openai_codex import (
     AsyncCodex,
-    Personality,
+)
+from openai_codex.types import (
     ReasoningSummary,
-    TextInput,
 )
 
 OUTPUT_SCHEMA = {
@@ -39,7 +38,6 @@ PROMPT = (
     "Analyze a safe rollout plan for enabling a feature flag in production. "
     "Return JSON matching the requested schema."
 )
-APPROVAL_POLICY = AskForApproval.model_validate("never")
 
 
 async def main() -> None:
@@ -49,10 +47,8 @@ async def main() -> None:
         )
 
         turn = await thread.turn(
-            TextInput(PROMPT),
-            approval_policy=APPROVAL_POLICY,
+            PROMPT,
             output_schema=OUTPUT_SCHEMA,
-            personality=Personality.pragmatic,
             summary=SUMMARY,
         )
         result = await turn.run()
@@ -64,8 +60,8 @@ async def main() -> None:
                 f"Expected JSON matching OUTPUT_SCHEMA, got: {structured_text!r}"
             ) from exc
 
-        summary = structured.get("summary")
-        actions = structured.get("actions")
+        summary = structured["summary"]
+        actions = structured["actions"]
         if (
             not isinstance(summary, str)
             or not isinstance(actions, list)

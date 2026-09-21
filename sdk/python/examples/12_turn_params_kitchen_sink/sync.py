@@ -10,12 +10,11 @@ from _bootstrap import ensure_local_sdk_src, runtime_config
 
 ensure_local_sdk_src()
 
-from codex_app_server import (
-    AskForApproval,
+from openai_codex import (
     Codex,
-    Personality,
+)
+from openai_codex.types import (
     ReasoningSummary,
-    TextInput,
 )
 
 OUTPUT_SCHEMA = {
@@ -37,18 +36,13 @@ PROMPT = (
     "Analyze a safe rollout plan for enabling a feature flag in production. "
     "Return JSON matching the requested schema."
 )
-APPROVAL_POLICY = AskForApproval.model_validate("never")
 
 with Codex(config=runtime_config()) as codex:
-    thread = codex.thread_start(
-        model="gpt-5.4", config={"model_reasoning_effort": "high"}
-    )
+    thread = codex.thread_start(model="gpt-5.4", config={"model_reasoning_effort": "high"})
 
     turn = thread.turn(
-        TextInput(PROMPT),
-        approval_policy=APPROVAL_POLICY,
+        PROMPT,
         output_schema=OUTPUT_SCHEMA,
-        personality=Personality.pragmatic,
         summary=SUMMARY,
     )
     result = turn.run()
@@ -60,8 +54,8 @@ with Codex(config=runtime_config()) as codex:
             f"Expected JSON matching OUTPUT_SCHEMA, got: {structured_text!r}"
         ) from exc
 
-    summary = structured.get("summary")
-    actions = structured.get("actions")
+    summary = structured["summary"]
+    actions = structured["actions"]
     if (
         not isinstance(summary, str)
         or not isinstance(actions, list)
