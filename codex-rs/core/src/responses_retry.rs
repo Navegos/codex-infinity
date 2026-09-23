@@ -22,6 +22,8 @@ use tracing::warn;
 
 const INITIAL_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(5);
 const MAX_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(60);
+const INITIAL_SERVER_OVERLOAD_RETRY_DELAY: Duration = Duration::from_secs(5);
+const MAX_SERVER_OVERLOAD_RETRY_DELAY: Duration = Duration::from_secs(60);
 
 /// Small cushion after the advertised reset time so retries do not race the window boundary.
 const USAGE_LIMIT_RESET_BUFFER: Duration = Duration::from_secs(2);
@@ -36,6 +38,8 @@ pub(crate) struct ResponsesStreamRetryState {
     retries: u64,
     connection_retries: u64,
     connection_retry_delay: Duration,
+    server_overload_attempts: u64,
+    server_overload_retry_delay: Duration,
 }
 
 impl Default for ResponsesStreamRetryState {
@@ -44,6 +48,8 @@ impl Default for ResponsesStreamRetryState {
             retries: 0,
             connection_retries: 0,
             connection_retry_delay: INITIAL_CONNECTION_RETRY_DELAY,
+            server_overload_attempts: 0,
+            server_overload_retry_delay: INITIAL_SERVER_OVERLOAD_RETRY_DELAY,
         }
     }
 }
@@ -182,6 +188,50 @@ fn log_retry(
                 "remote compaction v2 stream failed; retrying request after delay"
             );
         }
+    }
+}
+
+/// Waits with exponential backoff when the selected model reports capacity
+/// pressure, returning `Ok(())` when the caller should retry the request loop.
+/// Unlike bounded stream retries this waits indefinitely so agents recover
+/// without a manual restart; the wait is cancellable.
+pub(crate) async fn wait_for_server_overload_retry(
+    retry_state: &mut ResponsesStreamRetryState,
+    sess: &Session,
+    turn_context: &TurnContext,
+    err: CodexErr,
+    cancellation_token: &CancellationToken,
+) -> Result<(), CodexErr> {
+    if !matches!(err.details(), CodexErrorDetails::ServerOverloaded) {
+        return Err(err);
+    }
+    retry_state.server_overload_attempts = retry_state.server_overload_attempts.saturating_add(1);
+    let attempt = retry_state.server_overload_attempts;
+    let delay = retry_state.server_overload_retry_delay;
+    warn!(
+        turn_id = %turn_context.sub_id,
+        attempt,
+        ?delay,
+        error = %err,
+        "model at capacity; waiting to retry"
+    );
+    sess.notify_stream_error(
+        turn_context,
+        format!(
+            "Model at capacity, retrying in {}s (attempt {attempt})",
+            delay.as_secs()
+        ),
+        err,
+    )
+    .await;
+    retry_state.server_overload_retry_delay =
+        delay.saturating_mul(2).min(MAX_SERVER_OVERLOAD_RETRY_DELAY);
+    match tokio::time::sleep(delay)
+        .or_cancel(cancellation_token)
+        .await
+    {
+        Ok(()) => Ok(()),
+        Err(CancelErr::Cancelled) => Err(CodexErr::TurnAborted),
     }
 }
 

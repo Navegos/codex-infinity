@@ -9,6 +9,7 @@ use codex_protocol::protocol::RateLimitReachedType;
 use pretty_assertions::assert_eq;
 
 use super::ResponsesStreamRequest;
+use super::ResponsesStreamRetryState;
 use super::delay_until_usage_limit_reset;
 use super::is_auto_waitable_usage_limit;
 use super::log_retry;
@@ -70,6 +71,94 @@ fn delay_until_reset_is_zero_when_reset_time_has_passed() {
         delay_until_usage_limit_reset(resets_at),
         Some(Duration::from_secs(0))
     );
+}
+
+#[tokio::test]
+async fn usage_limit_wait_can_be_cancelled() {
+    let (session, turn_context) = make_session_and_context().await;
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    cancellation.cancel();
+    let error = CodexErr::UsageLimitReached(UsageLimitReachedError {
+        plan_type: None,
+        resets_at: Some(Utc::now() + chrono::Duration::hours(1)),
+        rate_limits: None,
+        promo_message: None,
+        rate_limit_reached_type: None,
+    });
+    let result = tokio::time::timeout(
+        Duration::from_secs(1),
+        super::wait_for_usage_limit_reset_if_applicable(
+            &session,
+            &turn_context,
+            error,
+            &cancellation,
+        ),
+    )
+    .await
+    .expect("cancelled wait should finish immediately");
+    assert!(matches!(
+        result.unwrap_err().details(),
+        codex_protocol::error::CodexErrorDetails::TurnAborted
+    ));
+}
+
+#[test]
+fn server_overload_retry_starts_with_five_second_delay() {
+    let state = ResponsesStreamRetryState::default();
+    assert_eq!(state.server_overload_attempts, 0);
+    assert_eq!(state.server_overload_retry_delay, Duration::from_secs(5));
+}
+
+#[tokio::test]
+async fn server_overload_wait_rejects_non_overload_errors() {
+    let (session, turn_context) = make_session_and_context().await;
+    let mut state = ResponsesStreamRetryState::default();
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    let result = super::wait_for_server_overload_retry(
+        &mut state,
+        &session,
+        &turn_context,
+        CodexErr::InternalServerError,
+        &cancellation,
+    )
+    .await;
+    assert!(matches!(
+        result.unwrap_err().details(),
+        codex_protocol::error::CodexErrorDetails::InternalServerError
+    ));
+    assert_eq!(state.server_overload_attempts, 0);
+    assert_eq!(state.server_overload_retry_delay, Duration::from_secs(5));
+}
+
+#[tokio::test]
+async fn server_overload_wait_can_be_cancelled_and_backs_off_exponentially() {
+    let (session, turn_context) = make_session_and_context().await;
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    cancellation.cancel();
+    let mut state = ResponsesStreamRetryState::default();
+    for (attempt, delay_secs) in [(1, 5), (2, 10), (3, 20)] {
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            super::wait_for_server_overload_retry(
+                &mut state,
+                &session,
+                &turn_context,
+                CodexErr::ServerOverloaded,
+                &cancellation,
+            ),
+        )
+        .await
+        .expect("cancelled wait should finish immediately");
+        assert!(matches!(
+            result.unwrap_err().details(),
+            codex_protocol::error::CodexErrorDetails::TurnAborted
+        ));
+        assert_eq!(state.server_overload_attempts, attempt);
+        assert_eq!(
+            state.server_overload_retry_delay,
+            Duration::from_secs(delay_secs * 2)
+        );
+    }
 }
 
 #[tokio::test]
