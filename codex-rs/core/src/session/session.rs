@@ -189,18 +189,6 @@ impl SessionConfiguration {
         }
     }
 
-    /// Apply the local rollout only when inferring config for a local environment.
-    pub(super) fn inferred_environment_config_for(
-        &self,
-        environment: &Environment,
-    ) -> EnvironmentConfig {
-        let mut config = self.inferred_environment_config();
-        if !environment.is_remote() {
-            config.windows_sandbox_type = self.windows_sandbox_type;
-        }
-        config
-    }
-
     pub(super) fn permission_profile(&self) -> PermissionProfile {
         self.permission_profile_state.permission_profile().clone()
     }
@@ -378,7 +366,7 @@ impl SessionConfiguration {
     ) -> ConstraintResult<()> {
         self.step_settings
             .validate(&self.step_settings_constraints(environments))?;
-        super::environment::validate_environment_selections(environments)
+        super::environment::validate_environment_configs(environments)
     }
 
     pub(super) fn step_settings_constraints(
@@ -549,7 +537,7 @@ impl SessionConfiguration {
             .map_or(current_environments, |environments| {
                 environments.environments.as_slice()
             });
-        super::environment::validate_environment_selections(next_environments)?;
+        super::environment::validate_environment_configs(next_environments)?;
         // Apply step settings last: the proposed permissions and environment
         // selections must be complete before deriving their validation constraints.
         next_configuration.step_settings = Arc::new(self.step_settings.apply(
@@ -1426,15 +1414,15 @@ impl Session {
             let turn_environments = Arc::new(ThreadEnvironments::new(
                 environment_manager,
                 default_shell.clone(),
-                |environment| session_configuration.inferred_environment_config_for(environment),
+                ThreadEnvironmentDefaults::new(
+                    session_configuration.inferred_environment_config(),
+                    session_configuration.windows_sandbox_type,
+                ),
                 shell_snapshot,
                 inherited_environments.unwrap_or_default(),
                 config.features.enabled(Feature::DeferredExecutor),
             ));
-            turn_environments.update_selections(
-                environment_selections,
-                |environment| session_configuration.inferred_environment_config_for(environment),
-            );
+            turn_environments.update_selections(environment_selections);
             session_configuration.environments = turn_environments.selections();
             let resolved_environments = turn_environments.snapshot().await;
             let agents_md_manager = Arc::new(AgentsMdManager::new(instructions));

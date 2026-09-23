@@ -264,6 +264,7 @@ mod turn_input;
 mod turn_suspension;
 mod world_state;
 use self::code_mode_warning::unsupported_code_mode_warning;
+pub(crate) use self::environment::ThreadEnvironmentDefaults;
 #[cfg(test)]
 use self::handlers::submission_dispatch_span;
 use self::handlers::submission_loop;
@@ -1901,18 +1902,11 @@ impl Session {
             let root_service_tier_changed = updated.parent_thread_id.is_none()
                 && state.session_configuration.step_settings.service_tier
                     != updated.step_settings.service_tier;
-            let environment_config = updated.inferred_environment_config();
             let mcp_inputs_changed = self.mcp_inputs_differ(&state.session_configuration, &updated);
             if mcp_inputs_changed {
                 self.mark_mcp_runtime_dirty();
             }
-            if state.session_configuration.inferred_environment_config() != environment_config {
-                self.services
-                    .turn_environments
-                    .update_thread_config(|environment| {
-                        updated.inferred_environment_config_for(environment)
-                    });
-            }
+            // Save new environment defaults for future turns. The running turn keeps its own.
             state.session_configuration = updated;
             if root_service_tier_changed {
                 self.services.agent_control.set_root_service_tier(
@@ -3320,14 +3314,32 @@ impl Session {
     )]
     pub(crate) async fn active_turn_context_and_strict_auto_review(
         &self,
-    ) -> Option<(Arc<TurnContext>, Arc<step_context::StepInputs>, bool)> {
+    ) -> Option<(
+        Arc<TurnContext>,
+        Arc<ResolvedStepSettings>,
+        TurnEnvironmentSnapshot,
+        bool,
+    )> {
         let active = self.active_turn.lock().await;
         let active = active.as_ref()?;
         let task = active.task.as_ref()?;
         let turn_context = Arc::clone(&task.turn_context);
-        let step_inputs = turn_context.next_step_input.load_full();
-        let ts = active.turn_state.lock().await;
-        Some((turn_context, step_inputs, ts.strict_auto_review_enabled()))
+        let settings = turn_context.next_step_settings.load_full();
+        let strict_auto_review = active.turn_state.lock().await.strict_auto_review_enabled();
+        let environments = self.services.turn_environments.snapshot_now();
+        Some((turn_context, settings, environments, strict_auto_review))
+    }
+
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "active turn reads must stay consistent with the matching turn state"
+    )]
+    pub(crate) async fn strict_auto_review_enabled(&self) -> bool {
+        let active = self.active_turn.lock().await;
+        let Some(active) = active.as_ref().filter(|active| active.task.is_some()) else {
+            return false;
+        };
+        active.turn_state.lock().await.strict_auto_review_enabled()
     }
 
     pub(crate) async fn granted_session_permissions(
@@ -3770,10 +3782,19 @@ impl Session {
         required_servers: &[String],
         required_plugins: &HashSet<String>,
     ) -> CodexResult<Arc<StepContext>> {
-        // Capture settings and selection together before asynchronous planning.
-        // Existing steps retain this version even if the turn is updated.
-        let inputs = turn_context.next_step_input.load_full();
-        let mut settings = Arc::clone(&inputs.settings);
+        // Read the step's model and record its environments together so an update cannot split them.
+        // Wait for executor startup below, after releasing the lock.
+        let (mut settings, environments) = {
+            let _active = self
+                .active_turn
+                .lock()
+                .or_cancel(cancellation_token)
+                .await?;
+            (
+                turn_context.next_step_settings.load_full(),
+                self.services.turn_environments.snapshot(),
+            )
+        };
         if matches!(
             turn_context.session_source,
             SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
@@ -3798,54 +3819,56 @@ impl Session {
             settings.model_info.as_ref(),
         );
         let session_telemetry = settings.telemetry(&turn_context.session_telemetry);
-        // Refresh only the captured step selection, without adopting newer inputs.
-        let environments = inputs.environments.refresh_readiness();
-        let (loaded_agents_md, warnings) = self
-            .services
-            .agents_md_manager
-            .refresh(&turn_context.config, &environments)
-            .or_cancel(cancellation_token)
-            .await?;
-        self.emit_instruction_warnings(warnings).await;
-        let loaded_agents_md = loaded_agents_md?;
-        let selected_capability_roots = self
-            .resolve_selected_capability_roots_for_step(&environments)
-            .await;
-        let ready_selected_capability_roots =
-            Self::ready_selected_capability_roots(&selected_capability_roots);
-        let executor_capability_discovery = self
-            .executor_capability_discovery_for_step(
-                &turn_context.config,
-                &ready_selected_capability_roots,
-                &environments,
-            )
-            .or_cancel(cancellation_token)
-            .await?;
-        let extension_data = codex_extension_api::ExtensionData::new(turn_context.sub_id.clone());
-        extension_data.insert(selected_capability_roots.clone());
-        if let Some(discovery) = &executor_capability_discovery {
-            extension_data.insert(discovery.as_ref().clone());
-            if !discovery.sandbox_contexts().is_empty() {
-                extension_data.insert(discovery.sandbox_contexts().clone());
+        let environments = environments.or_cancel(cancellation_token).await?;
+        // Keep both preparation futures off caller stacks while they are live together.
+        let load_agents_md = Box::pin(async {
+            let (loaded_agents_md, warnings) = self
+                .services
+                .agents_md_manager
+                .refresh(&turn_context.config, &environments)
+                .or_cancel(cancellation_token)
+                .await?;
+            self.emit_instruction_warnings(warnings).await;
+            loaded_agents_md
+        });
+        let prepare_tools = Box::pin(async {
+            let selected_capability_roots = self
+                .resolve_selected_capability_roots_for_step(&environments)
+                .await;
+            let ready_selected_capability_roots =
+                Self::ready_selected_capability_roots(&selected_capability_roots);
+            let executor_capability_discovery = self
+                .executor_capability_discovery_for_step(
+                    &turn_context.config,
+                    &ready_selected_capability_roots,
+                    &environments,
+                )
+                .await;
+            let extension_data =
+                codex_extension_api::ExtensionData::new(turn_context.sub_id.clone());
+            extension_data.insert(selected_capability_roots.clone());
+            if let Some(discovery) = &executor_capability_discovery {
+                extension_data.insert(discovery.as_ref().clone());
+                if !discovery.sandbox_contexts().is_empty() {
+                    extension_data.insert(discovery.sandbox_contexts().clone());
+                }
+            } else if !turn_context
+                .permission_profile_for_environments(&environments)
+                .file_system_sandbox_policy()
+                .has_full_disk_read_access()
+            {
+                let sandbox_contexts = environments
+                    .turn_environments()
+                    .map(|environment| {
+                        (
+                            environment.selection.environment_id.clone(),
+                            environment.sandbox_context(/*additional_permissions*/ None),
+                        )
+                    })
+                    .collect::<HashMap<_, _>>();
+                extension_data.insert(sandbox_contexts);
             }
-        } else if !turn_context
-            .permission_profile_for_environments(&environments)
-            .file_system_sandbox_policy()
-            .has_full_disk_read_access()
-        {
-            let sandbox_contexts = environments
-                .turn_environments()
-                .map(|environment| {
-                    (
-                        environment.selection.environment_id.clone(),
-                        environment.sandbox_context(/*additional_permissions*/ None),
-                    )
-                })
-                .collect::<HashMap<_, _>>();
-            extension_data.insert(sandbox_contexts);
-        }
-        let (mcp, prepared_recommendations) = async {
-            tokio::join!(
+            let (mcp, prepared_recommendations) = tokio::join!(
                 // MCP refresh can be large; keep it off the sampling request's stack.
                 Box::pin(self.mcp_runtime_for_step(
                     turn_context.as_ref(),
@@ -3854,34 +3877,52 @@ impl Session {
                     required_plugins,
                 )),
                 turn::prepare_tool_recommendations(self.as_ref(), turn_context.as_ref()),
+            );
+            let mut selected_plugins = self
+                .services
+                .thread_extension_data
+                .get::<codex_extension_api::SelectedPluginSnapshot>()
+                .map(|snapshot| snapshot.as_ref().clone())
+                .unwrap_or_default();
+            selected_plugins.plugins.retain(|plugin| {
+                ready_selected_capability_roots
+                    .iter()
+                    .any(|root| root.id == plugin.selected_root_id)
+            });
+            extension_data.insert(selected_plugins.clone());
+            let tool_router = turn::built_tools(
+                self.as_ref(),
+                turn_context.as_ref(),
+                &settings.model_info,
+                &environments,
+                &mcp,
+                &extension_data,
+                prepared_recommendations,
             )
-        }
-        .or_cancel(cancellation_token)
-        .await?;
-        let mut selected_plugins = self
-            .services
-            .thread_extension_data
-            .get::<codex_extension_api::SelectedPluginSnapshot>()
-            .map(|snapshot| snapshot.as_ref().clone())
-            .unwrap_or_default();
-        selected_plugins.plugins.retain(|plugin| {
-            ready_selected_capability_roots
-                .iter()
-                .any(|root| root.id == plugin.selected_root_id)
+            .await?;
+            Ok::<_, CodexErr>((
+                selected_capability_roots,
+                executor_capability_discovery,
+                mcp,
+                tool_router,
+                selected_plugins,
+            ))
         });
-        extension_data.insert(selected_plugins.clone());
+        // Returned warnings must finish delivery even if tools fail or preparation is cancelled.
+        let (loaded_agents_md, prepared_tools) =
+            tokio::join!(load_agents_md, prepare_tools.or_cancel(cancellation_token));
+        let loaded_agents_md = loaded_agents_md?;
+        if cancellation_token.is_cancelled() {
+            return Err(CodexErr::TurnAborted);
+        }
+        let (
+            selected_capability_roots,
+            executor_capability_discovery,
+            mcp,
+            tool_router,
+            selected_plugins,
+        ) = prepared_tools??;
         turn_context.extension_data.insert(selected_plugins);
-        let tool_router = turn::built_tools(
-            self.as_ref(),
-            turn_context.as_ref(),
-            &settings.model_info,
-            &environments,
-            &mcp,
-            &extension_data,
-            prepared_recommendations,
-        )
-        .or_cancel(cancellation_token)
-        .await??;
         Ok(Arc::new(StepContext {
             settings,
             token_budget,
