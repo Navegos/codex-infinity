@@ -3791,8 +3791,7 @@ impl Config {
         let requested_model = model.as_deref().or(cfg.model.as_deref());
         let inferred_deepseek_provider = model_provider.is_none()
             && cfg.model_provider.is_none()
-            && requested_model
-                .is_some_and(|model| matches!(model, "deepseek-v4-flash" | "deepseek-v4-pro"));
+            && requested_model.is_some_and(codex_models_manager::model_info::is_deepseek_slug);
         let inferred_openrouter_provider = model_provider.is_none()
             && cfg.model_provider.is_none()
             && requested_model.is_some_and(|model| model.starts_with("openrouter/"));

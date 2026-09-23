@@ -96,9 +96,29 @@ fn is_h1_heading(line: &str) -> bool {
     rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t')
 }
 
+/// Model slugs routed to the DeepSeek provider when no provider is configured.
+pub fn is_deepseek_slug(slug: &str) -> bool {
+    matches!(
+        slug,
+        "deepseek-v4-flash" | "deepseek-v4-pro" | "deepseek-v4.1-flash"
+    )
+}
+
+/// Model id to send to the provider for `slug`.
+///
+/// `deepseek-v4.1-flash` is a local alias: DeepSeek serves its flash tier as
+/// `deepseek-flash` and rejects the 4.1 slug ("The supported API model names are
+/// deepseek-flash, deepseek-v4-pro"), so the alias never reaches the wire.
+pub fn wire_model(slug: &str) -> &str {
+    match slug {
+        "deepseek-v4.1-flash" => "deepseek-flash",
+        other => other,
+    }
+}
+
 /// Build a minimal fallback model descriptor for missing/unknown slugs.
 pub fn model_info_from_slug(slug: &str) -> ModelInfo {
-    let is_deepseek = matches!(slug, "deepseek-v4-flash" | "deepseek-v4-pro");
+    let is_deepseek = is_deepseek_slug(slug);
     if !is_deepseek {
         warn!("Unknown model {slug} is used. This will use fallback model metadata.");
     }

@@ -987,7 +987,7 @@ impl ModelClient {
         }
         let client_metadata = responses_metadata.client_metadata(include_internal);
         let request = ResponsesApiRequest {
-            model: model_info.slug.clone(),
+            model: codex_models_manager::model_info::wire_model(&model_info.slug).to_string(),
             instructions,
             input,
             tools,
@@ -1814,7 +1814,7 @@ impl ModelClientSession {
             _ => "high",
         });
         let request = ChatRequestBuilder::new(
-            &model_info.slug,
+            codex_models_manager::model_info::wire_model(&model_info.slug),
             &prompt.base_instructions.text,
             &prompt.input,
             &tools,
