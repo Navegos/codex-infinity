@@ -36,7 +36,7 @@ impl ChatComposer {
         }
         let char_count = drafts.chars().count();
         if char_count > LARGE_PASTE_CHAR_THRESHOLD {
-            let placeholder = self.next_large_paste_placeholder(char_count);
+            let placeholder = self.next_large_paste_placeholder(drafts);
             self.draft.textarea.insert_element(&placeholder);
             self.draft.pending_pastes.push((placeholder, drafts.into()));
             self.sync_popups();
