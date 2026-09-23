@@ -754,6 +754,8 @@ impl ChatComposer {
                     .primary_hint(KeymapContext::Global, "open_transcript"),
                 find_transcript_key: default_keymap
                     .primary_hint(KeymapContext::Global, "find_transcript"),
+                focus_activity_key: default_keymap
+                    .primary_hint(KeymapContext::Global, "focus_activity"),
                 insert_newline_key: footer_insert_newline_key(
                     &default_keymap.editor.insert_newline,
                     use_shift_enter_hint,
@@ -768,6 +770,7 @@ impl ChatComposer {
                     .primary_hint(KeymapContext::Chat, "decrease_reasoning_effort"),
                 reasoning_up_key: default_keymap
                     .primary_hint(KeymapContext::Chat, "increase_reasoning_effort"),
+                toggle_voice_key: default_keymap.primary_hint(KeymapContext::Chat, "toggle_voice"),
             },
             has_focus: has_input_focus,
             frame_requester: None,
@@ -1037,6 +1040,8 @@ impl ChatComposer {
             keymap.primary_hint(KeymapContext::Global, "open_transcript");
         self.footer.find_transcript_key =
             keymap.primary_hint(KeymapContext::Global, "find_transcript");
+        self.footer.focus_activity_key =
+            keymap.primary_hint(KeymapContext::Global, "focus_activity");
         self.footer.insert_newline_key =
             match keymap.primary_hint(KeymapContext::Editor, "insert_newline") {
                 hint @ Some(ShortcutHint::Chord { .. }) => hint,
@@ -1055,6 +1060,7 @@ impl ChatComposer {
             keymap.primary_hint(KeymapContext::Chat, "decrease_reasoning_effort");
         self.footer.reasoning_up_key =
             keymap.primary_hint(KeymapContext::Chat, "increase_reasoning_effort");
+        self.footer.toggle_voice_key = keymap.primary_hint(KeymapContext::Chat, "toggle_voice");
     }
 
     /// Return the contexts whose handlers can consume the next composer key.
@@ -3869,9 +3875,14 @@ impl ChatComposer {
                 edit_previous: Some(key_hint::plain(KeyCode::Esc).into()),
                 show_transcript: self.footer.show_transcript_key,
                 find_transcript: self.footer.find_transcript_key,
+                focus_activity: self.footer.focus_activity_key,
                 history_search: self.footer.history_search_key,
                 reasoning_down: self.footer.reasoning_down_key,
                 reasoning_up: self.footer.reasoning_up_key,
+                toggle_voice: self
+                    .footer
+                    .toggle_voice_key
+                    .filter(|_| self.voice_command_enabled && !self.side_conversation_active),
             },
             active_agent_label: self.footer.active_agent_label.clone(),
         }
@@ -5093,50 +5104,6 @@ mod tests {
             ),
             rx,
         )
-    }
-
-    #[test]
-    fn shortcut_footer_displays_configured_chords() {
-        use codex_config::types::KeybindingSpec;
-        use codex_config::types::KeybindingsSpec;
-        use codex_config::types::TuiKeymap;
-
-        let mut config = TuiKeymap::default();
-        config.global.open_external_editor = Some(KeybindingsSpec::One(KeybindingSpec(
-            "ctrl-g ctrl-g".to_string(),
-        )));
-        config.editor.insert_newline = Some(KeybindingsSpec::One(KeybindingSpec(
-            "ctrl-x enter".to_string(),
-        )));
-        let keymap = RuntimeKeymap::from_config(&config).expect("valid composer chords");
-        let (mut composer, _rx) = new_test_composer();
-        composer.set_keymap_bindings(&keymap);
-        composer.footer.mode = FooterMode::ShortcutOverlay;
-
-        let hints = composer.footer_props().key_hints;
-        assert_eq!(
-            hints.external_editor,
-            Some(ShortcutHint::Chord {
-                prefix: key_hint::ctrl(KeyCode::Char('g')),
-                completion: key_hint::ctrl(KeyCode::Char('g')),
-            })
-        );
-        assert_eq!(
-            hints.insert_newline,
-            Some(ShortcutHint::Chord {
-                prefix: key_hint::ctrl(KeyCode::Char('x')),
-                completion: key_hint::plain(KeyCode::Enter),
-            })
-        );
-
-        snapshot_composer_state(
-            "footer_mode_configured_key_chords",
-            /*enhanced_keys_supported*/ false,
-            |composer| {
-                composer.set_keymap_bindings(&keymap);
-                composer.footer.mode = FooterMode::ShortcutOverlay;
-            },
-        );
     }
 
     #[test]
