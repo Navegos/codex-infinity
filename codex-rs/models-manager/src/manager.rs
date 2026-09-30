@@ -702,10 +702,10 @@ impl OpenAiModelsManager {
             }
             entry.models = models;
         }
-        // The backend catalog is authoritative for ChatGPT auth, so gateway models the fork
-        // owns are merged in afterwards rather than baked into the bundled catalog. An explicit
-        // provider catalog stays exactly as the provider returned it.
-        if matches!(self.catalog_source, CatalogSource::Default) {
+        // The backend catalog is authoritative for ChatGPT auth, and an explicit provider
+        // catalog is authoritative for that provider, so the gateway models the fork owns
+        // only join a catalog the backend does not own.
+        if !remote_only && matches!(self.catalog_source, CatalogSource::Default) {
             entry.models = crate::gateway_models::merge_gateway_models(entry.models);
         }
         *current = entry;

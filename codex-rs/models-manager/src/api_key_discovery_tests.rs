@@ -42,6 +42,8 @@ async fn api_key_discovery_startup_flag_controls_fetches_and_cached_catalogs() {
     let auth = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("test-key"));
     let manager =
         OpenAiModelsManager::new(home.path().into(), endpoint.clone(), Some(auth.clone()));
+    // No refresh happens here, so the catalog is the seeded default, which carries the
+    // fork's gateway models. Once the backend answers it owns the catalog and they drop out.
     let bundled = with_gateway_models(load_remote_models_from_file().unwrap());
 
     for strategy in [
@@ -67,7 +69,7 @@ async fn api_key_discovery_startup_flag_controls_fetches_and_cached_catalogs() {
             .raw_model_catalog(RefreshStrategy::Online, DEFAULT_HTTP_CLIENT_FACTORY)
             .await
             .models,
-        with_gateway_models(models.clone())
+        models.clone()
     );
     assert_eq!(endpoint.fetch_count(), 1);
 
@@ -77,7 +79,7 @@ async fn api_key_discovery_startup_flag_controls_fetches_and_cached_catalogs() {
             OpenAiModelsManager::new(home.path().into(), endpoint.clone(), Some(auth.clone()));
         restarted.set_api_key_model_discovery_enabled(enabled);
         let expected = if enabled {
-            with_gateway_models(models.clone())
+            models.clone()
         } else {
             bundled.clone()
         };

@@ -466,12 +466,9 @@ async fn manager_without_cache_fetches_on_every_refresh() {
         )
         .await;
 
-    assert_eq!(catalog.models, with_gateway_models(remote_models.clone()));
+    assert_eq!(catalog.models, remote_models.clone());
     assert_eq!(second_catalog, catalog);
-    assert_eq!(
-        manager.get_remote_models().await,
-        with_gateway_models(remote_models)
-    );
+    assert_eq!(manager.get_remote_models().await, remote_models);
     assert_eq!(endpoint.fetch_count(), 2);
 }
 
@@ -503,7 +500,7 @@ async fn injected_cache_hit_avoids_remote_fetch() {
         )
         .await;
 
-    assert_eq!(catalog.models, with_gateway_models(cached_models));
+    assert_eq!(catalog.models, cached_models);
     assert_eq!(endpoint.fetch_count(), 0);
 }
 
@@ -527,7 +524,7 @@ async fn injected_cache_read_error_falls_back_and_persists_remote_models() {
         )
         .await;
 
-    assert_eq!(catalog.models, with_gateway_models(remote_models.clone()));
+    assert_eq!(catalog.models, remote_models.clone());
     assert_eq!(endpoint.fetch_count(), 1);
     let stored_entries = cache.stored_entries();
     assert_eq!(
@@ -562,7 +559,7 @@ async fn injected_cache_write_error_does_not_fail_remote_refresh() {
         )
         .await;
 
-    assert_eq!(catalog.models, with_gateway_models(remote_models.clone()));
+    assert_eq!(catalog.models, remote_models.clone());
     assert_eq!(endpoint.fetch_count(), 1);
 }
 
@@ -932,10 +929,7 @@ async fn refresh_available_models_uses_remote_only_catalog_for_chatgpt_auth() {
         .await
         .expect("refresh succeeds");
 
-    assert_eq!(
-        manager.get_remote_models().await,
-        with_gateway_models(remote_models)
-    );
+    assert_eq!(manager.get_remote_models().await, remote_models);
     assert_eq!(endpoint.fetch_count(), 1, "expected a single model fetch");
 }
 
@@ -971,10 +965,7 @@ async fn refresh_available_models_uses_cached_remote_only_catalog_for_chatgpt_au
         .await
         .expect("cached refresh succeeds");
 
-    assert_eq!(
-        cache_manager.get_remote_models().await,
-        with_gateway_models(remote_models)
-    );
+    assert_eq!(cache_manager.get_remote_models().await, remote_models);
     assert_eq!(
         cache_endpoint.fetch_count(),
         0,
@@ -1241,24 +1232,14 @@ async fn online_refresh_updates_access_programs_with_unchanged_etag() {
     for model in [granted_model, revoked_model] {
         let mut expected = ModelPreset::from(model.clone());
         expected.is_default = true;
-        let gateway_presets = with_gateway_models(Vec::new())
-            .into_iter()
-            .map(ModelPreset::from)
-            .collect::<Vec<_>>();
+        // This catalog is owned by the backend, so the fork's gateway models stay out of it.
         assert_eq!(
             manager
                 .list_models(RefreshStrategy::Online, DEFAULT_HTTP_CLIENT_FACTORY)
                 .await,
-            std::iter::once(expected.clone())
-                .chain(gateway_presets.clone())
-                .collect::<Vec<_>>()
+            vec![expected.clone()]
         );
-        assert_eq!(
-            manager.get_remote_models().await,
-            std::iter::once(model.clone())
-                .chain(with_gateway_models(Vec::new()))
-                .collect::<Vec<_>>()
-        );
+        assert_eq!(manager.get_remote_models().await, vec![model.clone()]);
         assert_eq!(
             manager.remote_models.read().await.etag.as_deref(),
             Some("stable-catalog-etag")
@@ -1275,9 +1256,7 @@ async fn online_refresh_updates_access_programs_with_unchanged_etag() {
                     DEFAULT_HTTP_CLIENT_FACTORY
                 )
                 .await,
-            std::iter::once(expected)
-                .chain(gateway_presets)
-                .collect::<Vec<_>>()
+            vec![expected]
         );
         assert_eq!(cache_endpoint.fetch_count(), 0);
         assert_eq!(
@@ -1563,11 +1542,11 @@ async fn refresh_available_models_fetches_when_external_api_key_overrides_chatgp
 
     assert_eq!(
         cached_remote,
-        with_gateway_models(vec![remote_model(
+        vec![remote_model(
             dynamic_slug,
             "External API Key",
             /*priority*/ 1
-        )])
+        )]
     );
     assert_eq!(endpoint.fetch_count(), 1);
 }
@@ -1769,7 +1748,7 @@ fn gpt_5_6_prompts_are_concise_and_require_end_to_end_completion() {
 }
 
 #[tokio::test]
-async fn authoritative_backend_catalog_still_exposes_the_gateway_models() {
+async fn authoritative_backend_catalog_omits_the_gateway_models() {
     let codex_home = tempdir().expect("temp dir");
     let endpoint = TestModelsEndpoint::new(vec![vec![remote_model(
         "gpt-6-astra",
@@ -1782,6 +1761,8 @@ async fn authoritative_backend_catalog_still_exposes_the_gateway_models() {
         .list_models(RefreshStrategy::Online, DEFAULT_HTTP_CLIENT_FACTORY)
         .await;
 
+    // The backend owns this catalog, so it stays exactly as the backend returned it and the
+    // fork's gateway models do not join it.
     assert_eq!(
         manager
             .get_remote_models()
@@ -1789,12 +1770,7 @@ async fn authoritative_backend_catalog_still_exposes_the_gateway_models() {
             .iter()
             .map(|model| model.slug.as_str())
             .collect::<Vec<_>>(),
-        vec![
-            "gpt-6-astra",
-            "openrouter/mimo-v2.6-pro",
-            "openrouter/space-bunny-alpha",
-            "openpaths/openpaths-free",
-        ]
+        vec!["gpt-6-astra"]
     );
     assert_eq!(
         picker
@@ -1802,11 +1778,6 @@ async fn authoritative_backend_catalog_still_exposes_the_gateway_models() {
             .filter(|preset| preset.show_in_picker)
             .map(|preset| preset.model.as_str())
             .collect::<Vec<_>>(),
-        vec![
-            "gpt-6-astra",
-            "openrouter/mimo-v2.6-pro",
-            "openrouter/space-bunny-alpha",
-            "openpaths/openpaths-free",
-        ]
+        vec!["gpt-6-astra"]
     );
 }

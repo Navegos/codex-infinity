@@ -31,7 +31,7 @@ async fn mismatched_and_legacy_cache_entries_fetch_the_current_catalog() {
                 )
                 .await
                 .models,
-            with_gateway_models(vec![current.clone()])
+            vec![current.clone()]
         );
         assert_eq!(endpoint.fetch_count(), 1);
     }
