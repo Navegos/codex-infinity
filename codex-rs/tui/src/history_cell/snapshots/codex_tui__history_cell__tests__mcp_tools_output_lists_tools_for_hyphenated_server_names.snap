@@ -1,11 +1,18 @@
 ---
-source: tui/src/history_cell.rs
-assertion_line: 3310
+source: tui/src/history_cell/tests.rs
 expression: rendered
 ---
 /mcp
 
 🔌  MCP Tools
+
+  • codex-infinity
+    • Status: enabled
+    • Auth: Unsupported
+    • URL: https://codex-infinity.com/api/mcp
+    • Tools: (none)
+    • Resources: (none)
+    • Resource templates: (none)
 
   • some-server
     • Status: enabled
