@@ -343,13 +343,18 @@ impl OpenAiModelsManager {
         endpoint_client: Arc<dyn ModelsEndpointClient>,
         auth_manager: Option<Arc<AuthManager>>,
     ) -> Self {
+        // Gateway models the fork owns join the seed so they are offered before the first
+        // refresh, not only after one succeeds.
+        let remote_models = crate::gateway_models::merge_gateway_models(
+            load_remote_models_from_file().unwrap_or_default(),
+        );
         Self {
             remote_models: RwLock::new(ModelsCacheEntry {
                 fetched_at: Utc::now(),
                 etag: None,
                 client_version: Some(crate::client_version_to_whole()),
                 identity: endpoint_client.identity(),
-                models: load_remote_models_from_file().unwrap_or_default(),
+                models: remote_models,
             }),
             cache,
             api_key_model_discovery_enabled: AtomicBool::new(false),
@@ -698,8 +703,11 @@ impl OpenAiModelsManager {
             entry.models = models;
         }
         // The backend catalog is authoritative for ChatGPT auth, so gateway models the fork
-        // owns are merged in afterwards rather than baked into the bundled catalog.
-        entry.models = crate::gateway_models::merge_gateway_models(entry.models);
+        // owns are merged in afterwards rather than baked into the bundled catalog. An explicit
+        // provider catalog stays exactly as the provider returned it.
+        if matches!(self.catalog_source, CatalogSource::Default) {
+            entry.models = crate::gateway_models::merge_gateway_models(entry.models);
+        }
         *current = entry;
         true
     }

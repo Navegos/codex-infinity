@@ -1940,7 +1940,7 @@ dependencies = [
 
 [[package]]
 name = "codex-agent-message-board-client"
-version = "0.0.0"
+version = "0.156.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3052,7 +3052,7 @@ dependencies = [
 
 [[package]]
 name = "codex-core-plugin-common"
-version = "0.0.0"
+version = "0.156.1"
 dependencies = [
  "codex-utils-absolute-path",
  "semver",
@@ -5088,7 +5088,7 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-process"
-version = "0.0.0"
+version = "0.156.1"
 dependencies = [
  "pretty_assertions",
  "tokio",
@@ -5321,7 +5321,7 @@ dependencies = [
 
 [[package]]
 name = "codex-windows-sandbox-test-support"
-version = "0.0.0"
+version = "0.156.1"
 dependencies = [
  "dirs",
 ]
