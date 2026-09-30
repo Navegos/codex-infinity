@@ -36,6 +36,7 @@ fn auto_wait_skips_workspace_credit_and_spend_cap_errors() {
         let err = UsageLimitReachedError {
             plan_type: Some(PlanType::Known(KnownPlan::Pro)),
             resets_at: Some(resets_at),
+            limit_window_minutes: None,
             rate_limits: None,
             promo_message: None,
             rate_limit_reached_type: Some(rate_limit_reached_type),
@@ -51,6 +52,7 @@ fn auto_wait_allows_rate_limit_with_reset_time() {
         let err = UsageLimitReachedError {
             plan_type: Some(PlanType::Known(KnownPlan::Pro)),
             resets_at: Some(resets_at),
+            limit_window_minutes: None,
             rate_limits: None,
             promo_message: None,
             rate_limit_reached_type,
@@ -64,6 +66,7 @@ fn auto_wait_requires_reset_time() {
     let err = UsageLimitReachedError {
         plan_type: Some(PlanType::Known(KnownPlan::Pro)),
         resets_at: None,
+        limit_window_minutes: None,
         rate_limits: None,
         promo_message: None,
         rate_limit_reached_type: None,
@@ -88,6 +91,7 @@ async fn usage_limit_wait_can_be_cancelled() {
     let error = CodexErr::UsageLimitReached(UsageLimitReachedError {
         plan_type: None,
         resets_at: Some(Utc::now() + chrono::Duration::hours(1)),
+        limit_window_minutes: None,
         rate_limits: None,
         promo_message: None,
         rate_limit_reached_type: None,
