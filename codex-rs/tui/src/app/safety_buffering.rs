@@ -13,6 +13,8 @@ use codex_app_server_protocol::ThreadHistoryMode;
 use codex_app_server_protocol::TurnItemsView;
 use codex_app_server_protocol::UserInput;
 
+// The fork shows no safety-buffered retry menu, so nothing constructs this outside tests.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(super) struct SafetyBufferedRetry {
     pub(super) thread_id: ThreadId,
     pub(super) turn_id: String,
@@ -21,6 +23,8 @@ pub(super) struct SafetyBufferedRetry {
     pub(super) prompt: UserMessage,
 }
 
+// Kept for the fork's fork-on-retry behavior, which the tests drive directly.
+#[cfg_attr(not(test), allow(dead_code))]
 impl App {
     pub(super) async fn retry_safety_buffered_turn(
         &mut self,
@@ -201,7 +205,8 @@ impl App {
         };
         let retry_thread_id = started.session.thread_id;
 
-        self.shutdown_current_thread(app_server).await;
+        self.detach_current_thread_for_navigation(app_server, Some(retry_thread_id))
+            .await;
         if let Err(err) = self
             .replace_chat_widget_with_app_server_thread(
                 tui,
@@ -254,6 +259,7 @@ impl App {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn safety_retry_fork_point(turns: &[Turn], turn_id: &str) -> Result<()> {
     let Some(turn_index) = turns.iter().position(|turn| turn.id == turn_id) else {
         return Err(color_eyre::eyre::eyre!(

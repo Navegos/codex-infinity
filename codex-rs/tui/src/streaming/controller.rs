@@ -19,7 +19,8 @@
 //! agent and proposed-plan streams. Lines in `Outside` and `Markdown` fence
 //! contexts are scanned; lines inside non-markdown fences are skipped.
 //!
-//! Mermaid stays mutable while its containing top-level block is last. The closing fence replaces
+//! Transformable fences stay mutable while their containing top-level block is last. Markdown
+//! fences may gain literal delimiters when table rendering is disabled. For Mermaid, the closing fence replaces
 //! source with a diagram, and resizing can replace a diagram that no longer fits with its source.
 //! Once another block starts, the diagram enters scrollback so later prose does not grow the tail.
 //!
@@ -420,10 +421,21 @@ impl StreamCore {
             } => Some(table_start),
             TableHoldbackState::None => None,
         };
+        let source = self.state.collector.committed_source();
+        let source = source.strip_suffix('\n').unwrap_or(source);
+        let marker_start = source.rfind('\n').map_or(0, |index| index + 1);
+        let marker = source[marker_start..]
+            .trim()
+            .trim_start_matches(['>', ' ', '\t']);
+        let bare_list_marker = matches!(marker, "-" | "+" | "*")
+            || marker.strip_suffix(['.', ')']).is_some_and(|number| {
+                !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
+            });
         [
             table_start,
-            self.render.mermaid_start,
+            self.render.mutable_fence_start,
             self.render.pending_math_start,
+            bare_list_marker.then_some(marker_start),
         ]
         .into_iter()
         .flatten()
@@ -1356,8 +1368,8 @@ mod tests {
             "   This paragraph belongs to the same list item.".to_string(),
             "".to_string(),
             "4. Second loose item with a nested list after a blank line.".to_string(),
-            "    - Nested bullet under a loose item".to_string(),
-            "    - Another nested bullet".to_string(),
+            "    • Nested bullet under a loose item".to_string(),
+            "    • Another nested bullet".to_string(),
         ];
         assert_eq!(
             streamed, expected,
@@ -2081,3 +2093,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "rendering_preferences_tests.rs"]
+mod rendering_preferences_tests;

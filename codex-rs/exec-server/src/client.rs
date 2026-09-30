@@ -45,6 +45,7 @@ use crate::environment::EnvironmentConnectionState;
 use crate::process::ExecProcessEvent;
 use crate::process::ExecProcessEventLog;
 use crate::process::ExecProcessEventReceiver;
+use crate::process_telemetry::trace_process_id;
 use crate::protocol::CAPABILITY_ROOTS_DISCOVER_METHOD;
 use crate::protocol::CapabilityRootsDiscoverParams;
 use crate::protocol::CapabilityRootsDiscoverResponse;
@@ -148,9 +149,13 @@ mod provisioning_tests;
 mod recovery;
 #[path = "client_refresh.rs"]
 mod refresh;
-#[cfg(test)]
+pub(crate) use connection_failure::can_retry_connection_attempt;
 pub(crate) use recovery::is_environment_offline_error;
 pub(crate) use recovery::is_retryable_recovery_error;
+
+#[path = "client/connection_failure.rs"]
+mod connection_failure;
+use connection_failure::ConnectionFailure;
 pub(crate) use recovery::is_retryable_registry_error;
 pub(crate) use recovery::registry_recovery_retry_delay;
 use refresh::ConnectionAttempt;
@@ -300,7 +305,7 @@ struct ConnectionState {
 enum ConnectionStatus {
     Connected(Arc<RpcClient>),
     Recovering,
-    Failed(String),
+    Failed(ConnectionFailure),
 }
 
 impl ConnectionState {
@@ -321,7 +326,8 @@ impl ConnectionState {
         let _ = self
             .environment_connection_state_tx
             .send_if_modified(|current| {
-                if *current == state {
+                // A terminal failure must wake callers waiting on recovery.
+                if *current == state && !matches!(self.status, ConnectionStatus::Failed(_)) {
                     false
                 } else {
                     *current = state;
@@ -539,7 +545,7 @@ impl LazyRemoteExecServerClient {
                 || self.startup.result.get().is_some_and(|result| {
                     result
                         .as_ref()
-                        .is_err_and(|error| recovery::is_retryable_recovery_error(error))
+                        .is_err_and(|error| can_retry_connection_attempt(error))
                 })) {
             Box::pin(self.reconnect()).await
         } else {
@@ -666,6 +672,8 @@ pub enum ExecServerError {
     WebSocketConfiguration(String),
     #[error("timed out waiting for exec-server initialize handshake after {timeout:?}")]
     InitializeTimedOut { timeout: Duration },
+    #[error(transparent)]
+    ApplicationNetworkPolicy(#[from] codex_http_client::NetworkPolicyDenied),
     #[error("exec-server transport closed")]
     Closed,
     #[error("{0}")]
@@ -744,9 +752,7 @@ impl ExecServerClient {
             ConnectionStatus::Connected(_) | ConnectionStatus::Recovering => Err(
                 ExecServerError::Disconnected("exec-server environment is recovering".to_string()),
             ),
-            ConnectionStatus::Failed(message) => {
-                Err(ExecServerError::Disconnected(message.clone()))
-            }
+            ConnectionStatus::Failed(message) => Err(message.clone().into()),
         }
     }
 
@@ -834,11 +840,25 @@ impl ExecServerClient {
     // TODO: Remove after app-server migrates off this call.
     pub async fn force_environment_info(&self) -> Result<EnvironmentInfo, ExecServerError> {
         let rpc_client = self.rpc_client().await?;
-        self.map_rpc_call_result(
-            rpc_client
-                .call_with_timeout(ENVIRONMENT_INFO_METHOD, &(), ENVIRONMENT_INFO_TIMEOUT)
-                .await,
+        // Bound sending as well as receiving: a stuck transport can fill the outbound queue.
+        let result = timeout(
+            ENVIRONMENT_INFO_TIMEOUT,
+            rpc_client.call(ENVIRONMENT_INFO_METHOD, &()),
         )
+        .await;
+        match result {
+            Ok(result) => self.map_rpc_call_result(result),
+            Err(_) => {
+                let error = ExecServerError::from(RpcCallError::TimedOut {
+                    method: ENVIRONMENT_INFO_METHOD.to_string(),
+                    timeout: ENVIRONMENT_INFO_TIMEOUT,
+                });
+                // Retire only the connection we probed; recovery ignores a stale client.
+                rpc_client.close_transport().await;
+                self.inner.request_recovery(rpc_client, error.to_string());
+                Err(error)
+            }
+        }
     }
 
     pub async fn read_environment_config(
@@ -1020,6 +1040,11 @@ impl ExecServerClient {
             .await
     }
 
+    #[tracing::instrument(
+        name = "codex.exec_server.process_start",
+        skip_all,
+        fields(process.id = trace_process_id(params.process_id.as_str())),
+    )]
     pub(crate) async fn start_process(
         &self,
         params: ExecParams,
@@ -1178,9 +1203,7 @@ impl ExecServerClient {
                 Some(Ok(()))
             }
             ConnectionStatus::Connected(_) | ConnectionStatus::Recovering => None,
-            ConnectionStatus::Failed(message) => {
-                Some(Err(ExecServerError::Disconnected(message.clone())))
-            }
+            ConnectionStatus::Failed(message) => Some(Err(message.clone().into())),
         }
     }
 
@@ -1680,8 +1703,8 @@ impl Inner {
         // Do not register a process session that can never receive environment
         // notifications. Without this check, remote MCP startup could create a
         // dead session and wait for process output that will never arrive.
-        if let Some(message) = self.failure_message() {
-            return Err(ExecServerError::Disconnected(message));
+        if let Some(message) = self.connection_failure() {
+            return Err(message.into());
         }
         let sessions = self.sessions.load();
         if sessions.contains_key(process_id) {
@@ -2652,8 +2675,10 @@ mod tests {
         Ok(())
     }
 
+    #[test_case::test_case(false; "socket_closed")]
+    #[test_case::test_case(true; "health_check_timed_out")]
     #[tokio::test]
-    async fn remote_websocket_client_resumes_session() {
+    async fn remote_websocket_client_resumes_session(health_check_timeout: bool) {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("listener should bind");
@@ -2671,7 +2696,22 @@ mod tests {
                 /*expected_resume_session_id*/ None,
             )
             .await;
-            first.close(None).await.expect("websocket should close");
+            if health_check_timeout {
+                let JSONRPCMessage::Request(request) = read_jsonrpc_websocket(&mut first).await
+                else {
+                    panic!("expected environment info request");
+                };
+                assert_eq!(request.method, "environment/info");
+                // Keep the socket open without answering. The client must close it itself.
+                while let Some(Ok(message)) = first.next().await {
+                    assert!(matches!(message, Message::Ping(_) | Message::Close(_)));
+                    if matches!(message, Message::Close(_)) {
+                        break;
+                    }
+                }
+            } else {
+                first.close(None).await.expect("websocket should close");
+            }
 
             let mut resumed = accept_websocket(&listener).await;
             complete_websocket_initialize(
@@ -2694,6 +2734,13 @@ mod tests {
             HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
         );
         let stable_client = client.get().await.expect("client should connect");
+        if health_check_timeout {
+            let error = stable_client
+                .force_environment_info()
+                .await
+                .expect_err("unanswered health check should time out");
+            assert!(error.to_string().contains("timed out"));
+        }
         timeout(Duration::from_secs(1), resumed_rx)
             .await
             .expect("session resume should not time out")

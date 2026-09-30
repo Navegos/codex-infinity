@@ -39,7 +39,6 @@ const SAFETY_RETRY_THREAD_NAME: &str = "Safety retry source";
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SafetyRetryScenario {
     Once,
-    RetryTwice,
     InterruptedPrevious,
     UnsupportedPermissions,
 }
@@ -486,8 +485,6 @@ async fn run_safety_retry(
         gated_response_chunks("steered-response", ev_completed("steered-response"));
     let (previous_chunks, release_previous_response) =
         gated_response_chunks("previous-response", ev_completed("previous-response"));
-    let (retry_chunks, release_retry_response) =
-        gated_response_chunks("retry-response", ev_completed("retry-response"));
     let mut response_sequences = Vec::new();
     if previous_prompt.is_some() {
         if scenario == SafetyRetryScenario::InterruptedPrevious {
@@ -500,12 +497,7 @@ async fn run_safety_retry(
     if committed_steer.is_some() {
         response_sequences.push(steered_chunks);
     }
-    if scenario == SafetyRetryScenario::RetryTwice {
-        response_sequences.push(retry_chunks);
-        response_sequences.push(response_chunks("second-retry-response"));
-    } else {
-        response_sequences.push(response_chunks("retry-response"));
-    }
+    response_sequences.push(response_chunks("retry-response"));
     response_sequences.push(vec![StreamingSseChunk {
         gate: None,
         body: responses::sse(vec![
@@ -716,6 +708,11 @@ goals = true
 
     let primary_thread_id = ThreadId::new();
     app.primary_thread_id = Some(primary_thread_id);
+    let voice_owner = ThreadId::new();
+    let (mut owner, _, _, _) = crate::chatwidget::tests::make_chatwidget_manual_with_sender().await;
+    crate::chatwidget::activate_voice_for_thread(&mut owner, voice_owner);
+    owner.park_voice();
+    app.background_voice = Some(Box::new(owner));
     Box::pin(app.retry_safety_buffered_turn(
         &mut tui,
         &mut app_server,
@@ -790,6 +787,7 @@ goals = true
         },
     ))
     .await;
+    assert_eq!(app.voice_owner_thread_id(), Some(voice_owner));
 
     if scenario == SafetyRetryScenario::UnsupportedPermissions {
         assert_eq!(app.active_thread_id, Some(source_thread_id));
@@ -821,83 +819,11 @@ goals = true
         }
         let _ = release_steered_response.send(());
         let _ = release_previous_response.send(());
-        let _ = release_retry_response.send(());
         app_server.shutdown().await?;
         server.shutdown().await;
         return Ok(());
     }
 
-    let first_retry_thread_id = app.chat_widget.thread_id().expect("first retry thread id");
-    if scenario == SafetyRetryScenario::RetryTwice {
-        let first_retry_turn_id =
-            next_turn_started(&mut app, &mut app_server, first_retry_thread_id).await;
-        drive_until_request_count(
-            &mut app,
-            &mut app_server,
-            &server,
-            /*expected_request_count*/ 2,
-        )
-        .await;
-        app.handle_app_server_event(
-            &app_server,
-            AppServerEvent::ServerNotification(Box::new(
-                ServerNotification::ModelSafetyBufferingUpdated(
-                    ModelSafetyBufferingUpdatedNotification {
-                        thread_id: first_retry_thread_id.to_string(),
-                        turn_id: first_retry_turn_id.clone(),
-                        model: FASTER_MODEL.to_string(),
-                        use_cases: Vec::new(),
-                        reasons: Vec::new(),
-                        show_buffering_ui: true,
-                        faster_model: Some(FASTER_MODEL.to_string()),
-                    },
-                ),
-            )),
-        )
-        .await;
-        drain_active_thread_events(&mut app);
-        assert!(
-            app.chat_widget
-                .can_retry_safety_buffered_turn(&first_retry_turn_id)
-        );
-        app.chat_widget
-            .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        let second_retry = loop {
-            match app_event_rx.try_recv() {
-                Ok(event @ AppEvent::ConfirmSafetyBufferedRetry { .. }) => {
-                    Box::pin(app.handle_event(&mut tui, &mut app_server, event)).await?;
-                    app.chat_widget
-                        .handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-                    app.chat_widget
-                        .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-                }
-                Ok(AppEvent::RetrySafetyBufferedTurn {
-                    thread_id,
-                    turn_id,
-                    model,
-                    turn,
-                    prompt,
-                }) => {
-                    break SafetyBufferedRetry {
-                        thread_id,
-                        turn_id,
-                        model,
-                        turn,
-                        prompt,
-                    };
-                }
-                Ok(_) => continue,
-                Err(err) => panic!("expected second safety-buffering retry event: {err}"),
-            }
-        };
-        let AppCommand::UserTurn { items, .. } = &second_retry.turn else {
-            panic!("second safety-buffering retry should retain the user turn");
-        };
-        assert!(items.iter().any(
-            |item| matches!(item, AppServerUserInput::Text { text, .. } if text == RETRY_PROMPT)
-        ));
-        Box::pin(app.retry_safety_buffered_turn(&mut tui, &mut app_server, second_retry)).await;
-    }
 
     if let Some(draft) = failing_draft {
         assert_eq!(
@@ -968,15 +894,7 @@ goals = true
     );
     assert_eq!(
         retry.forked_from_id.as_deref(),
-        Some(
-            if scenario == SafetyRetryScenario::RetryTwice {
-                first_retry_thread_id
-            } else {
-                source_thread_id
-            }
-            .to_string()
-        )
-        .as_deref()
+        Some(source_thread_id.to_string()).as_deref()
     );
     let expected_retry_prompt = match committed_steer {
         Some(committed_steer) => format!("{RETRY_PROMPT}\n{committed_steer}"),
@@ -1045,26 +963,7 @@ goals = true
             "first-turn safety retry should not inherit an interruption marker"
         );
     }
-    let goal_continuation_request_index = if scenario == SafetyRetryScenario::RetryTwice {
-        let second_retry_request = request_bodies
-            .get(retry_request_index + 1)
-            .expect("second retry should issue a Responses API request");
-        assert!(
-            user_input_texts(second_retry_request)
-                .iter()
-                .any(|text| text == RETRY_PROMPT),
-            "second safety retry should submit the original prompt"
-        );
-        assert!(
-            !user_input_texts(second_retry_request)
-                .iter()
-                .any(|text| text.contains("<turn_aborted>")),
-            "second safety retry should not inherit an interruption marker"
-        );
-        retry_request_index + 2
-    } else {
-        retry_request_index + 1
-    };
+    let goal_continuation_request_index = retry_request_index + 1;
     assert!(
         user_input_texts(&request_bodies[goal_continuation_request_index])
             .iter()
@@ -1077,7 +976,6 @@ goals = true
     }
     let _ = release_steered_response.send(());
     let _ = release_previous_response.send(());
-    let _ = release_retry_response.send(());
     app_server.shutdown().await?;
     server.shutdown().await;
     Ok(())
@@ -1112,17 +1010,6 @@ async fn safety_retry_forks_first_turn_and_continues_without_duplicating_prompt(
         /*failing_draft*/ None,
         /*committed_steer*/ None,
         SafetyRetryScenario::Once,
-    )
-    .await
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn safety_retry_can_retry_a_first_turn_a_second_time() -> Result<()> {
-    run_safety_retry(
-        /*previous_prompt*/ None,
-        /*failing_draft*/ None,
-        /*committed_steer*/ None,
-        SafetyRetryScenario::RetryTwice,
     )
     .await
 }

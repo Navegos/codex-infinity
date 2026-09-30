@@ -15,10 +15,16 @@ struct ActiveSafetyBuffering {
 
 #[derive(Debug, Default)]
 pub(super) struct SafetyBufferingState {
+    submitted_turn: Option<(String, AppCommand)>,
     active: Option<ActiveSafetyBuffering>,
 }
 
 impl ChatWidget {
+    /// Records the submitted turn so a later safety-buffering notification can retry it.
+    pub(crate) fn record_safety_buffering_turn(&mut self, turn_id: String, turn: &AppCommand) {
+        self.safety_buffering.submitted_turn = Some((turn_id, turn.clone()));
+    }
+
     pub(super) fn reset_safety_buffering_for_turn_start(&mut self) {
         self.safety_buffering.active = None;
     }
@@ -43,6 +49,37 @@ impl ChatWidget {
             .active
             .as_ref()
             .is_some_and(|active| !active.agent_message_started)
+    }
+
+    /// The fork shows no retry menu, but `App::retry_safety_buffered_turn` still forks the
+    /// buffered turn on request. Keep the state checks those entry points rely on.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn can_retry_safety_buffered_turn(&self, turn_id: &str) -> bool {
+        self.turn_lifecycle.agent_turn_running
+            && self
+                .safety_buffering
+                .active
+                .as_ref()
+                .is_some_and(|active| active.turn_id == turn_id && !active.agent_message_started)
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn prepare_safety_buffered_retry_submission(&mut self, prompt: UserMessage) {
+        self.last_rendered_user_message_display = None;
+        self.finalize_turn();
+        self.safety_buffering_prompt = Some(prompt);
+        self.input_queue.user_turn_pending_start = true;
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn commit_safety_buffered_retry_submission(&mut self, display: UserMessageDisplay) {
+        self.on_user_message_display(display);
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn cancel_safety_buffered_retry_submission(&mut self) {
+        self.input_queue.user_turn_pending_start = false;
+        self.clear_safety_buffering();
     }
 
     pub(super) fn on_model_safety_buffering_updated(

@@ -45,6 +45,8 @@ fn add_from_api_key(servers: &mut HashMap<String, McpServerConfig>, api_key: Opt
             oauth: None,
             oauth_resource: None,
             tools: HashMap::new(),
+            startup_readiness: Default::default(),
+            tool_input_schema_max_bytes: None,
         });
 }
 

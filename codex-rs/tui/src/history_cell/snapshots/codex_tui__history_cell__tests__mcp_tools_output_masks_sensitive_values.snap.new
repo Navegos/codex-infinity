@@ -1,0 +1,35 @@
+---
+source: tui/src/history_cell/tests.rs
+assertion_line: 1084
+expression: rendered
+---
+/mcp
+
+🔌  MCP Tools
+
+  • codex-infinity
+    • Status: enabled
+    • Auth: Unsupported
+    • URL: https://codex-infinity.com/api/mcp
+    • Tools: (none)
+    • Resources: (none)
+    • Resource templates: (none)
+
+  • docs
+    • Status: enabled
+    • Auth: Unsupported
+    • Command: docs-server
+    • Env: TOKEN=*****, APP_TOKEN=*****
+    • Tools: list
+    • Resources: (none)
+    • Resource templates: (none)
+
+  • http
+    • Status: enabled
+    • Auth: Unsupported
+    • URL: https://example.com/mcp
+    • HTTP headers: Authorization=*****
+    • Env HTTP headers: X-API-Key=API_KEY_ENV
+    • Tools: ping
+    • Resources: (none)
+    • Resource templates: (none)

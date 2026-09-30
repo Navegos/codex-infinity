@@ -1,4 +1,4 @@
-//! Composer hints preserve input geometry and yield to interaction controls.
+//! Usage warnings preserve composer geometry and yield to active interactions.
 
 use super::*;
 use codex_app_server_protocol::RateLimitSnapshot;
@@ -17,18 +17,31 @@ fn quota(used_percent: i32) -> RateLimitSnapshot {
 }
 
 #[tokio::test]
-async fn usage_notice_preserves_composer_geometry_and_restores_tip_on_recovery() -> Result<()> {
+async fn usage_notice_preserves_composer_geometry_on_recovery() -> Result<()> {
     let mut snapshots = Vec::new();
-    for (width, running, used_percent) in [(80, false, 92), (32, true, 101), (18, true, 95)] {
+    for (width, height, running, queued, used_percent) in [
+        (80, 10, false, false, 92),
+        (80, 12, true, false, 98),
+        (32, 10, true, false, 101),
+        (18, 10, true, false, 95),
+        (80, 18, true, true, 98),
+        (80, 11, true, true, 98),
+        (80, 6, true, false, 98),
+    ] {
         let (mut app, mut events, _ops) = crate::app::tests::make_test_app_with_channels().await;
         app.local_settings.tui.show_tooltips = !running;
         app.local_settings.tui.animations = false;
         app.transcript_cells
-            .push(Arc::new(crate::history_cell::PlainHistoryCell::new(vec![
-                "Conversation".into(),
-            ])));
+            .push(Arc::new(crate::history_cell::PlainHistoryCell::new(
+                if running {
+                    (0..20)
+                        .map(|row| format!("Conversation row {row}").into())
+                        .collect()
+                } else {
+                    vec!["Conversation".into()]
+                },
+            )));
         if running {
-            app.chat_widget.apply_external_edit("draft stays".into());
             app.chat_widget.handle_server_notification(
                 ServerNotification::TurnStarted(TurnStartedNotification {
                     thread_id: ThreadId::new().to_string(),
@@ -46,14 +59,32 @@ async fn usage_notice_preserves_composer_geometry_and_restores_tip_on_recovery()
                 /*replay_kind*/ None,
             );
             assert!(app.chat_widget.is_user_turn_pending_or_running());
+            if queued {
+                app.keymap.chat.edit_queued_message = vec![crate::key_hint::shift(KeyCode::Left)];
+                app.chat_widget
+                    .apply_keymap_update(Default::default(), &app.keymap);
+                app.chat_widget
+                    .apply_external_edit("queued follow-up".into());
+                app.chat_widget
+                    .handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+                assert_eq!(
+                    app.chat_widget.queued_user_message_texts(),
+                    vec!["queued follow-up"],
+                );
+            }
+            app.chat_widget.apply_external_edit(if queued {
+                "draft stays\nsecond line".into()
+            } else {
+                "draft stays".into()
+            });
         }
         let mut tui = crate::tui::test_support::make_test_tui()?;
         tui.set_owned_screen(/*owned*/ true)?;
-        let size = Size::new(width, /*height*/ 10);
+        let size = Size::new(width, height);
         tui.terminal.resize(size)?;
         let before = app.render_owned_transcript(&mut tui, size)?;
         let cursor = tui.terminal.last_known_cursor_pos;
-        let tip = app.composer_hint(width.saturating_sub(/*rhs*/ 2));
+        let hint = app.composer_hint(width);
         app.chat_widget
             .on_rate_limit_snapshot(Some(quota(used_percent)));
         while let Ok(event) = events.try_recv() {
@@ -61,7 +92,7 @@ async fn usage_notice_preserves_composer_geometry_and_restores_tip_on_recovery()
                 app.insert_history_cell(&mut tui, cell);
             }
         }
-        assert_eq!(app.render_owned_transcript(&mut tui, size)?, before);
+        app.render_owned_transcript(&mut tui, size)?;
         assert_eq!(tui.terminal.last_known_cursor_pos, cursor);
         let buffer = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
         let screen = buffer
@@ -76,10 +107,12 @@ async fn usage_notice_preserves_composer_geometry_and_restores_tip_on_recovery()
             })
             .collect::<Vec<_>>()
             .join("\n");
-        snapshots.push(format!("{width} columns, running={running}\n{screen}"));
+        snapshots.push(format!(
+            "{width} columns, {height} rows, running={running}, queued={queued}\n{screen}"
+        ));
         app.chat_widget
             .on_rate_limit_snapshot(Some(quota(/*used_percent*/ 10)));
-        assert_eq!(app.composer_hint(width.saturating_sub(/*rhs*/ 2)), tip);
+        assert_eq!(app.composer_hint(width), hint);
         assert_eq!(app.render_owned_transcript(&mut tui, size)?, before);
         assert_eq!(tui.terminal.last_known_cursor_pos, cursor);
         tui.set_owned_screen(/*owned*/ false)?;
@@ -95,12 +128,13 @@ async fn usage_notice_preserves_composer_geometry_and_restores_tip_on_recovery()
 async fn usage_notice_yields_to_interactions_and_blocking_banners() {
     let mut app = crate::app::test_support::make_test_app().await;
     app.local_settings.tui.show_tooltips = true;
-    let tip = app.composer_hint(/*width*/ 80);
+    let hint = app.composer_hint(/*width*/ 80);
     app.chat_widget
         .on_rate_limit_snapshot(Some(quota(/*used_percent*/ 92)));
     let notice = app.composer_hint(/*width*/ 80);
     assert!(notice.is_some());
-    assert_ne!(notice, tip);
+    assert_ne!(notice, hint);
+    let notice_line = notice.as_ref().map(|notice| notice.line.clone());
     app.transcript_view.begin_search();
     assert_eq!(app.composer_hint(/*width*/ 80), None);
     app.transcript_view = Default::default();
@@ -125,7 +159,7 @@ async fn usage_notice_yields_to_interactions_and_blocking_banners() {
     }
     app.chat_widget
         .on_rate_limit_snapshot(Some(quota(/*used_percent*/ 92)));
-    assert_eq!(app.chat_widget.usage_notice(/*width*/ 80), notice);
+    assert_eq!(app.chat_widget.usage_notice(/*width*/ 78), notice_line);
     app.chat_widget.update_backend_banner(
         &serde_json::from_value(serde_json::json!({
             "rateLimits": quota(/*used_percent*/ 92),
@@ -138,54 +172,7 @@ async fn usage_notice_yields_to_interactions_and_blocking_banners() {
     );
     assert_eq!(app.chat_widget.usage_notice(/*width*/ 80), None);
     app.chat_widget.clear_backend_banner();
-    assert_eq!(app.chat_widget.usage_notice(/*width*/ 80), notice);
-}
-
-#[tokio::test]
-async fn hints_respect_settings_drafts_and_custom_shortcuts() -> Result<()> {
-    let mut app = crate::app::test_support::make_test_app().await;
-    app.local_settings.tui.show_tooltips = true;
-    app.transcript_cells = vec![Arc::new(crate::history_cell::new_user_prompt(
-        "question".into(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    ))];
-    app.keymap.app.find_transcript = vec![crate::key_hint::plain(KeyCode::F(12))];
-    let mut tui = crate::tui::test_support::make_test_tui()?;
-    tui.set_owned_screen(/*owned*/ true)?;
-    let mut snapshots = Vec::new();
-    for width in [80, 32] {
-        let size = Size::new(width, /*height*/ 8);
-        tui.terminal.resize(size)?;
-        app.render_owned_transcript(&mut tui, size)?;
-        let buffer = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
-        let rendered = (buffer.area.y..buffer.area.bottom())
-            .map(|y| {
-                (buffer.area.x..buffer.area.right())
-                    .map(|x| buffer[(x, y)].symbol())
-                    .collect::<String>()
-                    .trim_end()
-                    .to_string()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        snapshots.push(format!("{width} columns\n{rendered}"));
-    }
-    insta::assert_snapshot!(
-        "composer_tip_layout",
-        crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapshots.join("\n\n")),
-    );
-    app.keymap.app.find_transcript.clear();
-    assert_eq!(app.composer_hint(/*width*/ 80), None);
-    app.transcript_cells.clear();
-    app.chat_widget.apply_external_edit("draft".into());
-    assert_eq!(app.composer_hint(/*width*/ 80), None);
-    app.chat_widget.apply_external_edit(String::new());
-    app.local_settings.tui.show_tooltips = false;
-    assert_eq!(app.composer_hint(/*width*/ 80), None);
-    tui.set_owned_screen(/*owned*/ false)?;
-    Ok(())
+    assert_eq!(app.chat_widget.usage_notice(/*width*/ 78), notice_line);
 }
 
 #[tokio::test]

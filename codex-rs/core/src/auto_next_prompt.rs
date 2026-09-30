@@ -113,6 +113,7 @@ pub async fn generate_auto_next_prompt(
         /*attestation_provider*/ None,
         config.http_client_factory(),
         config.workspace_routing_context(),
+        /*request_contributors*/ Vec::new(),
     );
     let session_telemetry = SessionTelemetry::new(
         conversation_id,

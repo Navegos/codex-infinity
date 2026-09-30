@@ -1,0 +1,19 @@
+---
+source: tui/src/app/tests/safety_buffering.rs
+expression: rendered_retry
+---
+› Handle the safety-buffered request
+  Keep the accepted steer
+⚠ Full-history hydration is deprecated for paginated threads; omit `includeTurns` or set it to `false`, then page with `thread/turns/list` and `thread/items/list`.⚠ MCP client for `codex-infinity` failed to start: MCP startup failed:
+  handshaking with MCP server failed: Send message error Transport
+  [codex_rmcp_client::event_notification_transport::EventNotificationTransport<r
+  mcp::transport::worker::WorkerTransport<rmcp::transport::streamable_http_clien
+  t::StreamableHttpClientWorker<codex_rmcp_client::http_client_adapter::Streamab
+  leHttpClientAdapter>>>] error: unexpected server response: HTTP 401:
+  {"error":"unauthorized"}, when send initialize request: Send message error
+  Transport
+  [codex_rmcp_client::event_notification_transport::EventNotificationTransport<r
+  mcp::transport::worker::WorkerTransport<rmcp::transport::streamable_http_clien
+  t::StreamableHttpClientWorker<codex_rmcp_client::http_client_adapter::Streamab
+  leHttpClientAdapter>>>] error: unexpected server response: HTTP 401:
+  {"error":"unauthorized"}, when send initialize request⚠ MCP startup incomplete (failed: codex-infinity)• done  Worked for [duration] • [completion time]

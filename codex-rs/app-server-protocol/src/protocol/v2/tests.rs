@@ -100,6 +100,22 @@ fn managed_hooks_requirements_default_interrupt_to_empty() {
 }
 
 #[test]
+fn mcp_oauth_login_response_accepts_older_servers_without_login_id() {
+    let response = serde_json::from_value::<McpServerOauthLoginResponse>(json!({
+        "authorizationUrl": "https://example.com/authorize",
+    }))
+    .expect("older login response should deserialize");
+
+    assert_eq!(
+        response,
+        McpServerOauthLoginResponse {
+            authorization_url: "https://example.com/authorize".to_string(),
+            login_id: None,
+        }
+    );
+}
+
+#[test]
 fn external_agent_config_detect_response_defaults_connectors_for_older_servers() {
     let response = serde_json::from_value::<ExternalAgentConfigDetectResponse>(json!({
         "items": [],
@@ -400,7 +416,7 @@ fn thread_items_list_round_trips() {
     let params = ThreadItemsListParams {
         thread_id: "thr_123".to_string(),
         turn_id: Some("turn_456".to_string()),
-        cursor: Some("cursor_1".to_string()),
+        cursor: Some(ThreadItemsListCursor::Opaque("cursor_1".to_string())),
         limit: Some(50),
         sort_direction: Some(SortDirection::Asc),
     };
@@ -415,28 +431,63 @@ fn thread_items_list_round_trips() {
             "sortDirection": "asc",
         })
     );
-    let response = ThreadItemsListResponse {
-        data: vec![ThreadItemEntry {
-            turn_id: "turn_456".to_string(),
-            item: ThreadItem::ContextCompaction {
-                id: "item_1".to_string(),
-            },
-        }],
-        next_cursor: None,
-        backwards_cursor: Some("cursor_0".to_string()),
-    };
-
-    assert_eq!(
-        serde_json::to_value(&response).expect("serialize response"),
-        json!({
-            "data": [{
-                "turnId": "turn_456",
-                "item": {"type": "contextCompaction", "id": "item_1"},
+    for cursor in [
+        json!("cursor_1"),
+        json!({"type": "item", "itemId": "item-1"}),
+        serde_json::Value::Null,
+    ] {
+        let mut value = serde_json::to_value(&params).unwrap();
+        value["cursor"] = cursor;
+        let request = serde_json::from_value::<ThreadItemsListParams>(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(request).unwrap(), value);
+    }
+    for invalid in [
+        json!({"type": "other", "itemId": "item-1"}),
+        json!({"type": "item"}),
+        json!({"type": "item", "itemId": 1}),
+        json!(42),
+    ] {
+        let mut value = serde_json::to_value(&params).unwrap();
+        value["cursor"] = invalid;
+        assert!(serde_json::from_value::<ThreadItemsListParams>(value).is_err());
+    }
+    for (started_at_ms, completed_at_ms) in [
+        (Some(1_789_855_978_123), Some(1_789_855_979_456)),
+        (Some(1_789_855_978_123), None),
+        (Some(1_789_855_978_123), Some(1_789_855_978_123)),
+        (None, None),
+    ] {
+        let response = ThreadItemsListResponse {
+            data: vec![ThreadItemEntry {
+                turn_id: "turn_456".to_string(),
+                item: ThreadItem::ContextCompaction {
+                    id: "item_1".to_string(),
+                },
+                started_at_ms,
+                completed_at_ms,
             }],
-            "nextCursor": null,
-            "backwardsCursor": "cursor_0",
-        })
-    );
+            next_cursor: None,
+            backwards_cursor: Some("cursor_0".to_string()),
+        };
+        let value = serde_json::to_value(&response).expect("serialize response");
+        assert_eq!(
+            value,
+            json!({
+                "data": [{
+                    "turnId": "turn_456",
+                    "item": {"type": "contextCompaction", "id": "item_1"},
+                    "startedAtMs": started_at_ms,
+                    "completedAtMs": completed_at_ms,
+                }],
+                "nextCursor": null,
+                "backwardsCursor": "cursor_0",
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<ThreadItemsListResponse>(value).expect("deserialize response"),
+            response
+        );
+    }
 
     let params_without_turn = ThreadItemsListParams {
         thread_id: "thr_123".to_string(),
@@ -2324,6 +2375,41 @@ fn mcp_server_elicitation_request_from_core_url_request() {
 }
 
 #[test]
+fn mcp_server_user_verification_metadata_round_trips_from_core() {
+    for meta in [
+        None,
+        Some(json!({"example/display": {"label": "Operation"}})),
+    ] {
+        let mut wire = json!({
+            "mode": "openai/userVerification",
+            "title": "Approve",
+            "description": "Review operation",
+            "challenge": "AQID",
+        });
+        if let Some(meta) = &meta {
+            wire["_meta"] = meta.clone();
+        }
+        let core: CoreElicitationRequest = serde_json::from_value(wire.clone()).unwrap();
+        let request = McpServerElicitationRequest::try_from(core).unwrap();
+        assert_eq!(
+            request,
+            McpServerElicitationRequest::UserVerification {
+                meta: meta.clone(),
+                title: "Approve".into(),
+                description: "Review operation".into(),
+                challenge: "AQID".into(),
+            }
+        );
+        assert_eq!(
+            serde_json::from_value::<McpServerElicitationRequest>(wire.clone()).unwrap(),
+            request
+        );
+        wire["_meta"] = json!(meta);
+        assert_eq!(serde_json::to_value(request).unwrap(), wire);
+    }
+}
+
+#[test]
 fn mcp_server_elicitation_request_from_core_form_request() {
     let request = McpServerElicitationRequest::try_from(CoreElicitationRequest::Form {
         meta: None,
@@ -2589,6 +2675,7 @@ fn mcp_server_status_serializes_absent_server_info_as_null() {
             name: "not-ready".to_string(),
             runtime_status: None,
             plugin_id: None,
+            http_origin: None,
             server_info: None,
             tools: HashMap::new(),
             resources: Vec::new(),
@@ -2605,6 +2692,7 @@ fn mcp_server_status_serializes_absent_server_info_as_null() {
                 "name": "not-ready",
                 "runtimeStatus": null,
                 "pluginId": null,
+                "httpOrigin": null,
                 "serverInfo": null,
                 "serverCapabilities": null,
                 "tools": {},
@@ -2638,6 +2726,7 @@ fn mcp_server_status_accepts_older_inventory_without_runtime_status() {
             name: "older-server".to_string(),
             runtime_status: None,
             plugin_id: None,
+            http_origin: None,
             server_info: None,
             tools: HashMap::new(),
             resources: Vec::new(),
@@ -2711,6 +2800,7 @@ fn mcp_server_status_serializes_absent_server_info_metadata_as_null() {
             name: "initialized".to_string(),
             runtime_status: None,
             plugin_id: Some("lookup@test".to_string()),
+            http_origin: None,
             server_info: Some(McpServerInfo {
                 name: "lookup-server".to_string(),
                 title: None,
@@ -2734,6 +2824,7 @@ fn mcp_server_status_serializes_absent_server_info_metadata_as_null() {
                 "name": "initialized",
                 "runtimeStatus": null,
                 "pluginId": "lookup@test",
+                "httpOrigin": null,
                 "serverCapabilities": null,
                 "serverInfo": {
                     "name": "lookup-server",
@@ -3217,6 +3308,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
 
     let command_item = TurnItem::CommandExecution(CommandExecutionItem {
         model_context: None,
+        sandbox_type: None,
         id: "exec-1".to_string(),
         plugin_id: Some("sample@openai-curated".to_string()),
         script_path: Some("scripts/run.py".to_string()),
@@ -3250,6 +3342,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
         ThreadItem::from(command_item),
         ThreadItem::CommandExecution {
             model_context: None,
+            sandbox_type: None,
             id: "exec-1".to_string(),
             plugin_id: Some("sample@openai-curated".to_string()),
             script_path: Some("scripts/run.py".to_string()),
@@ -4671,6 +4764,11 @@ fn core_error_info_converts_to_camel_case() {
     for (core, expected) in [
         (CoreCodexErrorInfo::CyberPolicy, json!("cyberPolicy")),
         (CoreCodexErrorInfo::BioPolicy, json!("other")),
+        (CoreCodexErrorInfo::InvalidPrompt, json!("other")),
+        (
+            CoreCodexErrorInfo::FlexUnavailable,
+            json!("flexUnavailable"),
+        ),
         (
             CoreCodexErrorInfo::RateLimitExceeded,
             json!("rateLimitExceeded"),
