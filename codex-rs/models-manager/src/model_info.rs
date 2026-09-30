@@ -104,15 +104,24 @@ pub fn is_deepseek_slug(slug: &str) -> bool {
     )
 }
 
+/// Provider prefix that selects the built-in OpenRouter provider. It is a Codex-side
+/// namespace: OpenRouter ids start at the vendor segment, so the prefix never reaches it.
+const OPENROUTER_SLUG_PREFIX: &str = "openrouter/";
+
 /// Model id to send to the provider for `slug`.
 ///
-/// `deepseek-v4.1-flash` is a local alias: DeepSeek serves its flash tier as
-/// `deepseek-flash` and rejects the 4.1 slug ("The supported API model names are
-/// deepseek-flash, deepseek-v4-pro"), so the alias never reaches the wire.
+/// The provider prefix on a slug selects the provider and never reaches it: OpenRouter ids
+/// start at the vendor segment, and OpenPaths serves the free router as `openpaths-free`.
+/// Gateway models also get a short alias for their vendor-namespaced id, and
+/// `deepseek-v4.1-flash` is served as `deepseek-flash` and rejects the 4.1 slug ("The
+/// supported API model names are deepseek-flash, deepseek-v4-pro").
 pub fn wire_model(slug: &str) -> &str {
     match slug {
         "deepseek-v4.1-flash" => "deepseek-flash",
-        other => other,
+        "openrouter/mimo-v2.6-pro" => "xiaomi/mimo-v2.6-pro",
+        "openrouter/space-bunny-alpha" => "stealth/space-bunny-alpha",
+        "openpaths/openpaths-free" => "openpaths-free",
+        other => other.strip_prefix(OPENROUTER_SLUG_PREFIX).unwrap_or(other),
     }
 }
 
@@ -122,7 +131,21 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
     if !is_deepseek {
         warn!("Unknown model {slug} is used. This will use fallback model metadata.");
     }
+    ModelInfo {
+        used_fallback_model_metadata: !is_deepseek,
+        ..fallback_model_info(slug)
+    }
+}
+
+/// Fallback metadata for `slug` without the unknown-model warning or marker.
+///
+/// Catalog entries that the fork owns (see `crate::gateway_models`) start from the same
+/// descriptor but are known models, so neither the warning nor the fallback marker applies.
+pub(crate) fn fallback_model_info(slug: &str) -> ModelInfo {
+    let is_deepseek = is_deepseek_slug(slug);
+    // Callers that serve the slug decide whether it counts as unknown metadata.
     let mut model = ModelInfo {
+        used_fallback_model_metadata: false,
         slug: slug.to_string(),
         display_name: slug.to_string(),
         description: None,
@@ -157,7 +180,6 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
         effective_context_window_percent: 95,
         experimental_supported_tools: Vec::new(),
         input_modalities: default_input_modalities(),
-        used_fallback_model_metadata: !is_deepseek,
         supports_search_tool: false,
         supports_experimental_context: false,
         use_responses_lite: false,

@@ -697,6 +697,9 @@ impl OpenAiModelsManager {
             }
             entry.models = models;
         }
+        // The backend catalog is authoritative for ChatGPT auth, so gateway models the fork
+        // owns are merged in afterwards rather than baked into the bundled catalog.
+        entry.models = crate::gateway_models::merge_gateway_models(entry.models);
         *current = entry;
         true
     }

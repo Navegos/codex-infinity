@@ -21,6 +21,8 @@ use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::session::session::Session;
 use crate::session::session::SessionConfiguration;
 use crate::session::session::SessionSettingsUpdate;
+use codex_model_provider::SharedModelProvider;
+use codex_model_provider::create_model_provider;
 
 /// Defaults for environments that inherit their configuration from the running turn.
 pub(crate) struct ThreadEnvironmentDefaults {
@@ -169,7 +171,31 @@ impl Session {
             ensure_configs_stay_owner_provided(current_environments, &environments.environments)?;
         }
 
-        current.apply(updates, current_environments)
+        let mut updated = current.apply(updates, current_environments)?;
+        if let Some(provider) = self.provider_for_selected_model(current, &updated) {
+            updated.provider = provider;
+        }
+        Ok(updated)
+    }
+
+    /// Provider the newly selected model resolves to when the session never pinned one.
+    ///
+    /// Gateway model slugs name their provider, so switching models mid-session must
+    /// rebind or the new model would be sent to the startup provider.
+    fn provider_for_selected_model(
+        &self,
+        current: &SessionConfiguration,
+        updated: &SessionConfiguration,
+    ) -> Option<SharedModelProvider> {
+        let model = updated.step_settings.collaboration_mode.model();
+        if model == current.step_settings.collaboration_mode.model() {
+            return None;
+        }
+        let config = &updated.original_config_do_not_use;
+        let provider = config.model_provider_for_model(model)?;
+        (provider != updated.provider.info()).then(|| {
+            create_model_provider(provider.clone(), Some(self.services.auth_manager.clone()))
+        })
     }
 
     /// Activates the environments accepted for a new task. Configuration may have arrived for

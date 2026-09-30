@@ -27,7 +27,11 @@ fn config_with_personality(personality: Option<Personality>) -> ModelsManagerCon
 
 #[test]
 fn deepseek_v4_has_native_context_and_reasoning_metadata() {
-    for slug in ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4.1-flash"] {
+    for slug in [
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4.1-flash",
+    ] {
         let model = model_info_from_slug(slug);
         assert_eq!(model.context_window, Some(1_000_000));
         assert_eq!(model.max_context_window, Some(1_000_000));
@@ -41,7 +45,39 @@ fn deepseek_v4_1_flash_alias_resolves_to_the_served_model_id() {
     assert!(is_deepseek_slug("deepseek-v4.1-flash"));
     assert_eq!(wire_model("deepseek-v4.1-flash"), "deepseek-flash");
     // Ids DeepSeek serves directly must pass through untouched.
-    for slug in ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro", "gpt-6-sol"] {
+    for slug in [
+        "deepseek-flash",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "gpt-6-sol",
+    ] {
+        assert_eq!(wire_model(slug), slug);
+    }
+}
+
+#[test]
+fn gateway_model_slugs_resolve_to_the_ids_their_providers_serve() {
+    assert_eq!(
+        wire_model("openrouter/mimo-v2.6-pro"),
+        "xiaomi/mimo-v2.6-pro"
+    );
+    assert_eq!(
+        wire_model("openrouter/space-bunny-alpha"),
+        "stealth/space-bunny-alpha"
+    );
+    assert_eq!(wire_model("openpaths/openpaths-free"), "openpaths-free");
+    // Fully qualified OpenRouter slugs only lose the Codex-side provider prefix.
+    assert_eq!(
+        wire_model("openrouter/xiaomi/mimo-v2.6-pro"),
+        "xiaomi/mimo-v2.6-pro"
+    );
+    // Ids the providers serve directly must pass through untouched.
+    for slug in [
+        "xiaomi/mimo-v2.6-pro",
+        "stealth/space-bunny-alpha",
+        "openpaths/auto",
+        "openpaths/composer-2.5",
+    ] {
         assert_eq!(wire_model(slug), slug);
     }
 }
