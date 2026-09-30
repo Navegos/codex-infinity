@@ -67,6 +67,7 @@ mod doctor;
 mod exec_server_args_tests;
 mod exec_server_auth;
 mod exec_server_telemetry;
+mod infinity_cmd;
 mod marketplace_cmd;
 mod mcp_cmd;
 mod mcp_login;
@@ -169,6 +170,9 @@ enum Subcommand {
 
     /// Manage external MCP servers for Codex.
     Mcp(McpCli),
+
+    /// Connect to Codex Infinity cloud tools and sync selected provider keys.
+    Infinity(infinity_cmd::InfinityCli),
 
     /// Manage Codex plugins.
     Plugin(PluginCli),
@@ -1325,6 +1329,14 @@ async fn cli_main(
                 root_config_overrides.clone(),
             );
             codex_exec::run_main(exec_cli, arg0_paths.clone()).await?;
+        }
+        Some(Subcommand::Infinity(infinity_cli)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "infinity",
+            )?;
+            infinity_cli.run(root_config_overrides.clone()).await?;
         }
         Some(Subcommand::Mcp(mut mcp_cli)) => {
             reject_remote_mode_for_subcommand(
@@ -2688,6 +2700,7 @@ fn unsupported_subcommand_name_for_strict_config(
         }
         Some(Subcommand::RemoteControl(remote_control)) => Some(remote_control.subcommand_name()),
         Some(Subcommand::Mcp(_)) => Some("mcp"),
+        Some(Subcommand::Infinity(_)) => Some("infinity"),
         Some(Subcommand::Plugin(_)) => Some("plugin"),
         Some(Subcommand::MigrateRollouts(_)) => Some("migrate-rollouts"),
         #[cfg(any(target_os = "macos", target_os = "windows"))]

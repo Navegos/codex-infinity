@@ -1,6 +1,7 @@
 //! Shared tool definitions and Responses API tool primitives that can live
 //! outside `codex-core`.
 
+mod chat_tools;
 mod code_mode;
 mod dynamic_tool;
 mod function_call_error;
@@ -21,6 +22,7 @@ mod tool_payload;
 mod tool_search;
 mod tool_spec;
 
+pub use chat_tools::create_tools_json_for_chat_completions_api;
 pub use code_mode::augment_tool_spec_for_code_mode;
 pub use code_mode::code_mode_name_for_tool_name;
 pub use code_mode::collect_code_mode_exec_prompt_tool_definitions;
@@ -105,7 +107,6 @@ pub use tool_search::ToolSearchInfo;
 pub use tool_spec::ResponsesApiWebSearchFilters;
 pub use tool_spec::ResponsesApiWebSearchUserLocation;
 pub use tool_spec::ToolSpec;
-pub use tool_spec::create_tools_json_for_chat_completions_api;
 pub use tool_spec::create_tools_json_for_responses_api;
 pub use tool_spec::create_tools_json_for_responses_lite;
 pub use tool_spec::create_tools_raw_json_for_responses_api;

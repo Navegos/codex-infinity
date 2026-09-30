@@ -318,10 +318,10 @@ async fn chat_client_uses_chat_completions_path_and_bearer_auth() -> Result<()> 
         Arc::new(StaticAuth::new("deepseek-key", "unused")),
     );
     let _stream = client
-        .stream_request(ChatRequest {
-            body: serde_json::json!({"model": "deepseek-v4-flash", "stream": true}),
-            headers: HeaderMap::new(),
-        })
+        .stream_request(ChatRequest::new(
+            serde_json::json!({"model": "deepseek-v4-flash", "stream": true}),
+            HeaderMap::new(),
+        ))
         .await?;
 
     let requests = state.take_stream_requests();

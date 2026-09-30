@@ -98,7 +98,9 @@ fn is_h1_heading(line: &str) -> bool {
 
 /// Build a minimal fallback model descriptor for missing/unknown slugs.
 pub fn model_info_from_slug(slug: &str) -> ModelInfo {
-    let is_deepseek = matches!(slug, "deepseek-v4-flash" | "deepseek-v4-pro");
+    let is_deepseek = matches!(slug, "deepseek-v4-flash" | "deepseek-v4-pro")
+        || slug.starts_with("openpaths/")
+        || slug.ends_with("-exp");
     if !is_deepseek {
         warn!("Unknown model {slug} is used. This will use fallback model metadata.");
     }

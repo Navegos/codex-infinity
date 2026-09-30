@@ -61,7 +61,7 @@ impl<T: HttpTransport> ChatClient<T> {
             stream_response,
             self.session.provider().stream_idle_timeout,
             self.sse_telemetry.clone(),
-            None,
+            request.tool_mapping,
         ))
     }
 }

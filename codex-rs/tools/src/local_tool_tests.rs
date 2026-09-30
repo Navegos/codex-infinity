@@ -143,7 +143,7 @@ fn exec_command_tool_matches_expected_spec() {
         (
             "yield_time_ms".to_string(),
             JsonSchema::number(Some(
-                    "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms.".to_string(),
+                    "Wait before yielding output. Defaults to 10000 ms; effective range is 250-120000 ms. For long-running builds/tests, pass a long wait (minutes) and avoid polling with short timeouts — each poll costs a full model turn.".to_string(),
                 )),
         ),
         (
@@ -215,7 +215,7 @@ fn write_stdin_tool_matches_expected_spec() {
         (
             "yield_time_ms".to_string(),
             JsonSchema::number(Some(
-                "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-300000 ms by default.".to_string(),
+                "Wait before yielding output. Non-empty writes default to 250 ms and cap at 120000 ms; empty polls wait 30000-300000 ms by default. Prefer longer waits (minutes) to avoid busy polling — each poll costs a full model turn.".to_string(),
             )),
         ),
         (

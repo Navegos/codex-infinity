@@ -712,11 +712,13 @@ pub fn built_in_model_providers(
         "https://openrouter.ai/api/v1",
         "OPENROUTER_API_KEY",
     );
-    let openpaths_provider = P::create_openai_compatible_provider(
+    let mut openpaths_provider = P::create_openai_compatible_provider(
         "OpenPaths",
         "https://openpaths.io/v1",
         "OPENPATHS_API_KEY",
     );
+    openpaths_provider.env_key_instructions =
+        Some("Create an API key at https://openpaths.io and export OPENPATHS_API_KEY.".into());
 
     // This fork includes DeepSeek alongside the upstream OpenAI and local OSS providers.
     [

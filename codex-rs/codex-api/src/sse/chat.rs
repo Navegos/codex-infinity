@@ -1,6 +1,8 @@
 use crate::common::ResponseEvent;
 use crate::common::ResponseStream;
 use crate::error::ApiError;
+use crate::requests::chat_tools::ChatToolMapping;
+use crate::requests::chat_tools::restore_tool_call;
 use crate::telemetry::SseTelemetry;
 use codex_client::StreamResponse;
 use codex_protocol::models::ContentItem;
@@ -11,7 +13,6 @@ use futures::Stream;
 use futures::StreamExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -21,7 +22,7 @@ pub(crate) fn spawn_chat_stream(
     response: StreamResponse,
     idle_timeout: Duration,
     telemetry: Option<Arc<dyn SseTelemetry>>,
-    _turn_state: Option<Arc<OnceLock<String>>>,
+    tool_mapping: ChatToolMapping,
 ) -> ResponseStream {
     let upstream_request_id = response
         .headers
@@ -34,6 +35,7 @@ pub(crate) fn spawn_chat_stream(
         tx_event,
         idle_timeout,
         telemetry,
+        tool_mapping,
     ));
     ResponseStream {
         rx_event,
@@ -53,6 +55,7 @@ pub(crate) async fn process_chat_sse<S>(
     tx: mpsc::Sender<Result<ResponseEvent, ApiError>>,
     idle_timeout: Duration,
     telemetry: Option<Arc<dyn SseTelemetry>>,
+    tool_mapping: ChatToolMapping,
 ) where
     S: Stream<Item = Result<bytes::Bytes, codex_client::TransportError>> + Unpin,
 {
@@ -203,19 +206,13 @@ pub(crate) async fn process_chat_sse<S>(
     }
     for (index, call) in tool_calls {
         let Some(name) = call.name else { continue };
-        let _ = tx
-            .send(Ok(ResponseEvent::OutputItemDone(
-                ResponseItem::FunctionCall {
-                    id: None,
-                    name,
-                    namespace: None,
-                    arguments: call.arguments,
-                    encrypted_function_args: None,
-                    call_id: call.id.unwrap_or_else(|| format!("tool-call-{index}")),
-                    internal_chat_message_metadata_passthrough: None,
-                },
-            )))
-            .await;
+        let item = restore_tool_call(
+            &tool_mapping,
+            name,
+            call.arguments,
+            call.id.unwrap_or_else(|| format!("tool-call-{index}")),
+        );
+        let _ = tx.send(item.map(ResponseEvent::OutputItemDone)).await;
     }
     let _ = tx
         .send(Ok(ResponseEvent::Completed {
@@ -244,7 +241,14 @@ mod tests {
         let stream = ReaderStream::new(std::io::Cursor::new(body))
             .map_err(|error| codex_client::TransportError::Network(error.to_string()));
         let (tx, mut rx) = mpsc::channel(16);
-        process_chat_sse(stream, tx, Duration::from_secs(1), None).await;
+        process_chat_sse(
+            stream,
+            tx,
+            Duration::from_secs(1),
+            /*telemetry*/ None,
+            ChatToolMapping::new(),
+        )
+        .await;
         let mut events = Vec::new();
         while let Some(event) = rx.recv().await {
             events.push(event.unwrap());

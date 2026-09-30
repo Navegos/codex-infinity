@@ -1,8 +1,11 @@
 use crate::error::ApiError;
 use crate::provider::Provider;
+use crate::requests::chat_tools::ChatToolMapping;
+use crate::requests::chat_tools::wire_tool_name;
 use crate::requests::headers::build_session_headers;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ImageReference;
 use codex_protocol::models::ReasoningItemContent;
 use codex_protocol::models::ResponseItem;
@@ -13,6 +16,19 @@ use serde_json::json;
 pub struct ChatRequest {
     pub body: Value,
     pub headers: HeaderMap,
+    pub(crate) tool_mapping: ChatToolMapping,
+}
+
+impl ChatRequest {
+    /// Creates a raw request without namespace or custom-tool routing. Use
+    /// `ChatRequestBuilder` when adapting Codex tools for Chat Completions.
+    pub fn new(body: Value, headers: HeaderMap) -> Self {
+        Self {
+            body,
+            headers,
+            tool_mapping: ChatToolMapping::new(),
+        }
+    }
 }
 
 pub struct ChatRequestBuilder<'a> {
@@ -55,6 +71,25 @@ impl<'a> ChatRequestBuilder<'a> {
     }
 
     pub fn build(self, _provider: &Provider) -> Result<ChatRequest, ApiError> {
+        let mut tools = self.tools.to_vec();
+        let mut tool_mapping = ChatToolMapping::new();
+        for tool in &mut tools {
+            if let Some(metadata) = tool
+                .as_object_mut()
+                .and_then(|object| object.remove("x_codex"))
+            {
+                let name = tool["function"]["name"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                tool_mapping.insert(
+                    name,
+                    serde_json::from_value(metadata).map_err(|_| {
+                        ApiError::Stream("invalid local Chat Completions tool metadata".into())
+                    })?,
+                );
+            }
+        }
         let mut messages = vec![json!({"role": "system", "content": self.instructions})];
         let mut pending_reasoning = String::new();
         for item in self.input {
@@ -102,39 +137,39 @@ impl<'a> ChatRequestBuilder<'a> {
                 }
                 ResponseItem::FunctionCall {
                     name,
+                    namespace,
                     arguments,
                     call_id,
                     ..
                 } => push_tool_call(
                     &mut messages,
                     call_id,
-                    name,
+                    &wire_tool_name(name, namespace.as_deref()),
                     arguments,
+                    (!pending_reasoning.is_empty()).then(|| std::mem::take(&mut pending_reasoning)),
+                ),
+                ResponseItem::CustomToolCall {
+                    name,
+                    namespace,
+                    input,
+                    call_id,
+                    ..
+                } => push_tool_call(
+                    &mut messages,
+                    call_id,
+                    &wire_tool_name(name, namespace.as_deref()),
+                    &json!({"input": input}).to_string(),
                     (!pending_reasoning.is_empty()).then(|| std::mem::take(&mut pending_reasoning)),
                 ),
                 ResponseItem::FunctionCallOutput {
                     call_id, output, ..
                 } => {
-                    let content = match &output.body {
-                        FunctionCallOutputBody::Text(text) => text.clone(),
-                        FunctionCallOutputBody::ContentItems(items) => items
-                            .iter()
-                            .filter_map(|item| {
-                                match item {
-                                codex_protocol::models::FunctionCallOutputContentItem::InputText {
-                                    text,
-                                } => Some(text.as_str()),
-                                _ => None,
-                            }
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    };
-                    messages.push(json!({
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "content": content
-                    }));
+                    push_tool_output(&mut messages, call_id.as_deref(), output);
+                }
+                ResponseItem::CustomToolCallOutput {
+                    call_id, output, ..
+                } => {
+                    push_tool_output(&mut messages, Some(call_id), output);
                 }
                 ResponseItem::Reasoning {
                     content: Some(content),
@@ -157,7 +192,7 @@ impl<'a> ChatRequestBuilder<'a> {
             "model": self.model,
             "messages": messages,
             "stream": true,
-            "tools": self.tools,
+            "tools": tools,
         });
         if let Some(object) = body.as_object_mut() {
             if self.tools.is_empty() {
@@ -174,9 +209,37 @@ impl<'a> ChatRequestBuilder<'a> {
         }
         Ok(ChatRequest {
             body,
+            tool_mapping,
             headers: build_session_headers(self.session_id, None),
         })
     }
+}
+
+fn push_tool_output(
+    messages: &mut Vec<Value>,
+    call_id: Option<&str>,
+    output: &FunctionCallOutputPayload,
+) {
+    let content = match &output.body {
+        FunctionCallOutputBody::Text(text) => text.clone(),
+        FunctionCallOutputBody::ContentItems(items) => items
+            .iter()
+            .filter_map(
+                |item| match item {
+                    codex_protocol::models::FunctionCallOutputContentItem::InputText {
+                        text,
+                    } => Some(text.as_str()),
+                    _ => None,
+                },
+            )
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+    messages.push(json!({
+        "role": "tool",
+        "tool_call_id": call_id.unwrap_or_default(),
+        "content": content
+    }));
 }
 
 fn push_tool_call(
@@ -215,7 +278,7 @@ mod tests {
     use codex_protocol::models::ContentItem;
     use std::time::Duration;
 
-    fn provider() -> Provider {
+    pub(super) fn provider() -> Provider {
         Provider {
             name: "DeepSeek".into(),
             base_url: "https://api.deepseek.com".into(),
@@ -265,3 +328,7 @@ mod tests {
         assert!(request.body.get("tools").is_none());
     }
 }
+
+#[cfg(test)]
+#[path = "chat_round_trip_tests.rs"]
+mod round_trip_tests;
