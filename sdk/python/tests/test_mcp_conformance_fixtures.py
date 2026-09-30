@@ -10,9 +10,7 @@ def test_mcp_conformance_fixture_self_tests() -> None:
         repository_root / "public" / "scripts" / "mcp_conformance",
         repository_root / "scripts" / "mcp_conformance",
     )
-    fixture_directory = next(
-        (candidate for candidate in candidates if candidate.is_dir()), None
-    )
+    fixture_directory = next((candidate for candidate in candidates if candidate.is_dir()), None)
     assert fixture_directory is not None, (
         "MCP conformance fixtures are missing; checked "
         + " and ".join(str(candidate) for candidate in candidates)

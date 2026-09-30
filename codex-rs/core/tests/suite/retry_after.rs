@@ -480,10 +480,7 @@ async fn responses_http_overload_retries_sampling_after_request_retries_exhaust(
     .expect("overload retries should finish the turn");
 
     assert_eq!(error_events, 0);
-    assert!(
-        stream_error_events >= 1,
-        "expected a capacity retry notice"
-    );
+    assert!(stream_error_events >= 1, "expected a capacity retry notice");
     assert_eq!(response_mock.requests().len(), 4);
     let request_count = server
         .received_requests()
@@ -1330,7 +1327,11 @@ async fn sse_overload_with_retry_after_retries_with_backoff() -> Result<()> {
         .build_with_auto_env(&server)
         .await?;
 
-    submit_user_input(&test, "recover from the streamed overload despite retry advice").await?;
+    submit_user_input(
+        &test,
+        "recover from the streamed overload despite retry advice",
+    )
+    .await?;
 
     let mut error_events = 0;
     let mut stream_error_events = 0;
@@ -1907,7 +1908,11 @@ async fn websocket_overload_with_nested_retry_after_retries_with_backoff() -> Re
         .wait_for_request(/*connection_index*/ 0, /*request_index*/ 0)
         .await;
     assert_eq!(warmup.body_json()["generate"].as_bool(), Some(false));
-    submit_user_input(&test, "recover from the websocket overload despite retry advice").await?;
+    submit_user_input(
+        &test,
+        "recover from the websocket overload despite retry advice",
+    )
+    .await?;
 
     let mut error_events = 0;
     let mut stream_error_events = 0;
@@ -1935,10 +1940,7 @@ async fn websocket_overload_with_nested_retry_after_retries_with_backoff() -> Re
     }
 
     assert_eq!(error_events, 0);
-    assert!(
-        stream_error_events >= 1,
-        "expected a capacity retry notice"
-    );
+    assert!(stream_error_events >= 1, "expected a capacity retry notice");
     assert_eq!(
         fallback_warning_events, 0,
         "websocket must not fall back to HTTP"
@@ -2024,10 +2026,7 @@ async fn websocket_overload_without_retry_after_retries_with_backoff() -> Result
     }
 
     assert_eq!(error_events, 0);
-    assert!(
-        stream_error_events >= 1,
-        "expected a capacity retry notice"
-    );
+    assert!(stream_error_events >= 1, "expected a capacity retry notice");
     assert_eq!(
         fallback_warning_events, 0,
         "websocket must not fall back to HTTP"

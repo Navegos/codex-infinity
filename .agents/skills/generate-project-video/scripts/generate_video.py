@@ -20,7 +20,9 @@ def redact(text):
 
 def request_json(url, payload, headers, timeout):
     body = None if payload is None else json.dumps(payload).encode()
-    request = urllib.request.Request(url, body, headers | ({"Content-Type": "application/json"} if body else {}))
+    request = urllib.request.Request(
+        url, body, headers | ({"Content-Type": "application/json"} if body else {})
+    )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             raw = response.read().decode()
@@ -69,7 +71,9 @@ def save_video(url, output, timeout):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--provider", choices=("openpaths", "netwrck"), default="openpaths")
+    parser.add_argument(
+        "--provider", choices=("openpaths", "netwrck"), default="openpaths"
+    )
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--image-url")
     parser.add_argument("--model", default="auto-video", help="OpenPaths model id")
@@ -81,7 +85,9 @@ def main():
     parser.add_argument("--netwrck-engine", choices=("ltx", "wan"), default="ltx")
     parser.add_argument("--generate-audio", action="store_true")
     parser.add_argument("--base-url", help="Override the provider base URL")
-    parser.add_argument("--timeout", type=float, default=900, help="Total poll timeout in seconds")
+    parser.add_argument(
+        "--timeout", type=float, default=900, help="Total poll timeout in seconds"
+    )
     parser.add_argument("--poll-interval", type=float, default=2)
     parser.add_argument("--no-poll", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
@@ -125,7 +131,9 @@ def main():
                 "aspect_ratio": args.aspect_ratio,
             }
         else:
-            endpoint = "ltx-2.3-image-to-video" if args.image_url else "ltx-text-to-video"
+            endpoint = (
+                "ltx-2.3-image-to-video" if args.image_url else "ltx-text-to-video"
+            )
             url = f"{base}/api/{endpoint}"
             payload = {
                 "api_key": os.environ.get(env_name, ""),
@@ -146,7 +154,17 @@ def main():
         safe_payload = dict(payload)
         if "api_key" in safe_payload:
             safe_payload["api_key"] = f"${env_name}"
-        print(json.dumps({"method": "POST", "url": url, "headers": safe_headers, "json": safe_payload}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "method": "POST",
+                    "url": url,
+                    "headers": safe_headers,
+                    "json": safe_payload,
+                },
+                indent=2,
+            )
+        )
         return
     if not os.environ.get(env_name):
         raise SystemExit(f"{env_name} is required")
@@ -168,11 +186,23 @@ def main():
             result_url = video_url(response)
             if result_url:
                 break
-            if str(response.get("status", "")).lower() in {"failed", "error", "cancelled"}:
+            if str(response.get("status", "")).lower() in {
+                "failed",
+                "error",
+                "cancelled",
+            }:
                 detail = redact(json.dumps(response))
-                raise SystemExit(f"video job ended with status {response.get('status')}: {detail}")
+                raise SystemExit(
+                    f"video job ended with status {response.get('status')}: {detail}"
+                )
 
-    result = {"provider": args.provider, "model": args.model if args.provider == "openpaths" else args.netwrck_engine, "job_id": identifier, "video_url": result_url, "response": response}
+    result = {
+        "provider": args.provider,
+        "model": args.model if args.provider == "openpaths" else args.netwrck_engine,
+        "job_id": identifier,
+        "video_url": result_url,
+        "response": response,
+    }
     if result_url and args.output:
         result["output"] = save_video(result_url, args.output, min(args.timeout, 600))
     print(redact(json.dumps(result, indent=2)))

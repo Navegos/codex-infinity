@@ -20,7 +20,9 @@ from urllib.request import urlopen
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 CODEX_CLI_ROOT = SCRIPT_DIR.parent
-DEFAULT_WORKFLOW_URL = "https://github.com/openai/codex/actions/runs/26131514935"  # rust-v0.132.0
+DEFAULT_WORKFLOW_URL = (
+    "https://github.com/openai/codex/actions/runs/26131514935"  # rust-v0.132.0
+)
 VENDOR_DIR_NAME = "vendor"
 RG_MANIFEST = CODEX_CLI_ROOT / "bin" / "rg"
 BINARY_TARGETS = (
@@ -36,7 +38,9 @@ CODEX_PACKAGE_COMPONENT = "codex-package"
 
 @dataclass(frozen=True)
 class BinaryComponent:
-    artifact_prefix: str  # matches the artifact filename prefix (e.g. codex-<target>.zst)
+    artifact_prefix: (
+        str  # matches the artifact filename prefix (e.g. codex-<target>.zst)
+    )
     dest_dir: str  # directory under vendor/<target>/ where the binary is installed
     binary_basename: str  # executable name inside dest_dir (before optional .exe)
     targets: tuple[str, ...] | None = None  # limit installation to specific targets
@@ -77,7 +81,9 @@ RG_TARGET_PLATFORM_PAIRS: list[tuple[str, str]] = [
     ("x86_64-pc-windows-msvc", "windows-x86_64"),
     ("aarch64-pc-windows-msvc", "windows-aarch64"),
 ]
-RG_TARGET_TO_PLATFORM = {target: platform for target, platform in RG_TARGET_PLATFORM_PAIRS}
+RG_TARGET_TO_PLATFORM = {
+    target: platform for target, platform in RG_TARGET_PLATFORM_PAIRS
+}
 DEFAULT_RG_TARGETS = [target for target, _ in RG_TARGET_PLATFORM_PAIRS]
 
 # urllib.request.urlopen() defaults to no timeout (can hang indefinitely), which is painful in CI.
@@ -174,12 +180,16 @@ def main() -> int:
     print(f"Downloading native artifacts from workflow {workflow_id}...")
 
     with _gha_group(f"Download native artifacts from workflow {workflow_id}"):
-        with tempfile.TemporaryDirectory(prefix="codex-native-artifacts-") as artifacts_dir_str:
+        with tempfile.TemporaryDirectory(
+            prefix="codex-native-artifacts-"
+        ) as artifacts_dir_str:
             artifacts_dir = Path(artifacts_dir_str)
             _download_artifacts(workflow_id, artifacts_dir)
             if CODEX_PACKAGE_COMPONENT in components:
                 try:
-                    install_codex_package_archives(artifacts_dir, vendor_dir, BINARY_TARGETS)
+                    install_codex_package_archives(
+                        artifacts_dir, vendor_dir, BINARY_TARGETS
+                    )
                 except FileNotFoundError:
                     if not (args.allow_legacy_codex_package or use_default_workflow):
                         raise
@@ -192,7 +202,11 @@ def main() -> int:
             install_binary_components(
                 artifacts_dir,
                 vendor_dir,
-                [BINARY_COMPONENTS[name] for name in components if name in BINARY_COMPONENTS],
+                [
+                    BINARY_COMPONENTS[name]
+                    for name in components
+                    if name in BINARY_COMPONENTS
+                ],
             )
 
     if "rg" in components:
@@ -263,7 +277,9 @@ def install_legacy_codex_package_layouts(
         "Synthesizing Codex package layouts from legacy artifacts for targets: "
         + ", ".join(targets)
     )
-    with tempfile.TemporaryDirectory(prefix="codex-legacy-package-") as legacy_vendor_dir_str:
+    with tempfile.TemporaryDirectory(
+        prefix="codex-legacy-package-"
+    ) as legacy_vendor_dir_str:
         legacy_vendor_dir = Path(legacy_vendor_dir_str)
         install_binary_components(
             artifacts_dir,
@@ -281,7 +297,9 @@ def install_legacy_codex_package_layouts(
             dest_dir = vendor_dir / target
             if dest_dir.exists():
                 shutil.rmtree(dest_dir)
-            _build_legacy_codex_package_layout(legacy_vendor_dir / target, dest_dir, target)
+            _build_legacy_codex_package_layout(
+                legacy_vendor_dir / target, dest_dir, target
+            )
             print(f"  synthesized {dest_dir}")
 
 
@@ -317,7 +335,9 @@ def _build_legacy_codex_package_layout(
         ]:
             shutil.copy2(legacy_target_dir / "codex" / helper, resources_dir / helper)
     elif "linux" in target:
-        shutil.copy2(legacy_target_dir / "codex-resources" / "bwrap", resources_dir / "bwrap")
+        shutil.copy2(
+            legacy_target_dir / "codex-resources" / "bwrap", resources_dir / "bwrap"
+        )
 
     write_json(
         package_dir / "codex-package.json",
@@ -364,7 +384,9 @@ def fetch_rg(
 
         platform_info = platforms.get(platform_key)
         if platform_info is None:
-            raise RuntimeError(f"Platform '{platform_key}' not found in manifest {manifest_path}.")
+            raise RuntimeError(
+                f"Platform '{platform_key}' not found in manifest {manifest_path}."
+            )
 
         task_configs.append((target, platform_key, platform_info))
 
@@ -395,7 +417,9 @@ def fetch_rg(
                     title="ripgrep install failed",
                     message=f"target={target} error={exc!r}",
                 )
-                raise RuntimeError(f"Failed to install ripgrep for target {target}.") from exc
+                raise RuntimeError(
+                    f"Failed to install ripgrep for target {target}."
+                ) from exc
             print(f"  installed ripgrep for {target}")
 
     return [results[target] for target in targets]
@@ -454,13 +478,17 @@ def _install_single_binary(
     component: BinaryComponent,
 ) -> Path:
     artifact_subdir = artifact_dir_for_target(artifacts_dir, target)
-    archive_path = legacy_binary_archive_path(artifact_subdir, component.artifact_prefix, target)
+    archive_path = legacy_binary_archive_path(
+        artifact_subdir, component.artifact_prefix, target
+    )
 
     dest_dir = vendor_dir / target / component.dest_dir
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     binary_name = (
-        f"{component.binary_basename}.exe" if "windows" in target else component.binary_basename
+        f"{component.binary_basename}.exe"
+        if "windows" in target
+        else component.binary_basename
     )
     dest = dest_dir / binary_name
     dest.unlink(missing_ok=True)
@@ -476,17 +504,23 @@ def _archive_name_for_target(artifact_prefix: str, target: str) -> str:
     return f"{artifact_prefix}-{target}.zst"
 
 
-def legacy_binary_archive_path(artifact_dir: Path, artifact_prefix: str, target: str) -> Path:
+def legacy_binary_archive_path(
+    artifact_dir: Path, artifact_prefix: str, target: str
+) -> Path:
     archive_names = [_archive_name_for_target(artifact_prefix, target)]
     if artifact_dir.name == f"{target}-unsigned":
-        archive_names.append(_archive_name_for_target(artifact_prefix, f"{target}-unsigned"))
+        archive_names.append(
+            _archive_name_for_target(artifact_prefix, f"{target}-unsigned")
+        )
 
     for archive_name in archive_names:
         archive_path = artifact_dir / archive_name
         if archive_path.exists():
             return archive_path
 
-    raise FileNotFoundError(f"Expected artifact not found: {artifact_dir / archive_names[0]}")
+    raise FileNotFoundError(
+        f"Expected artifact not found: {artifact_dir / archive_names[0]}"
+    )
 
 
 def artifact_dir_for_target(artifacts_dir: Path, target: str) -> Path:
@@ -507,7 +541,9 @@ def _fetch_single_rg(
 ) -> Path:
     providers = platform_info.get("providers", [])
     if not providers:
-        raise RuntimeError(f"No providers listed for platform '{platform_key}' in {manifest_path}.")
+        raise RuntimeError(
+            f"No providers listed for platform '{platform_key}' in {manifest_path}."
+        )
 
     url = providers[0]["url"]
     archive_format = platform_info.get("format", "zst")
@@ -563,7 +599,10 @@ def _download_file(url: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.unlink(missing_ok=True)
 
-    with urlopen(url, timeout=DOWNLOAD_TIMEOUT_SECS) as response, open(dest, "wb") as out:
+    with (
+        urlopen(url, timeout=DOWNLOAD_TIMEOUT_SECS) as response,
+        open(dest, "wb") as out,
+    ):
         shutil.copyfileobj(response, out)
 
 
@@ -585,7 +624,9 @@ def extract_archive(
 
     if archive_format == "tar.gz":
         if not archive_member:
-            raise RuntimeError("Missing 'path' for tar.gz archive in DotSlash manifest.")
+            raise RuntimeError(
+                "Missing 'path' for tar.gz archive in DotSlash manifest."
+            )
         with tarfile.open(archive_path, "r:gz") as tar:
             try:
                 member = tar.getmember(archive_member)
@@ -620,7 +661,9 @@ def _load_manifest(manifest_path: Path) -> dict:
     try:
         manifest = json.loads(stdout)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Invalid DotSlash manifest output from {manifest_path}.") from exc
+        raise RuntimeError(
+            f"Invalid DotSlash manifest output from {manifest_path}."
+        ) from exc
 
     if not isinstance(manifest, dict):
         raise RuntimeError(

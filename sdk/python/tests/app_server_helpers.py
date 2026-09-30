@@ -11,7 +11,6 @@ from app_server_harness import (
     ev_response_created,
     sse,
 )
-
 from openai_codex.generated.v2_all import (
     AgentMessageDeltaNotification,
     ItemCompletedNotification,

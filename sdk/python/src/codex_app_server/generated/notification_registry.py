@@ -7,87 +7,89 @@ from typing import TypeAlias
 
 from pydantic import BaseModel
 
-from .v2_all import AccountLoginCompletedNotification
-from .v2_all import AccountRateLimitsUpdatedNotification
-from .v2_all import AccountUpdatedNotification
-from .v2_all import AgentMessageDeltaNotification
-from .v2_all import AppListUpdatedNotification
-from .v2_all import AuthRecoveryNotification
-from .v2_all import CommandExecOutputDeltaNotification
-from .v2_all import CommandExecutionOutputDeltaNotification
-from .v2_all import ConfigWarningNotification
-from .v2_all import ContextCompactedNotification
-from .v2_all import DeprecationNoticeNotification
-from .v2_all import EnvironmentConnectionNotification
-from .v2_all import ErrorNotification
-from .v2_all import ExternalAgentConfigImportCompletedNotification
-from .v2_all import ExternalAgentConfigImportProgressNotification
-from .v2_all import FileChangeOutputDeltaNotification
-from .v2_all import FileChangePatchUpdatedNotification
-from .v2_all import FsChangedNotification
-from .v2_all import FuzzyFileSearchSessionCompletedNotification
-from .v2_all import FuzzyFileSearchSessionUpdatedNotification
-from .v2_all import GatewayOAuthChangedNotification
-from .v2_all import GuardianWarningNotification
-from .v2_all import HookCompletedNotification
-from .v2_all import HookStartedNotification
-from .v2_all import ItemCompletedNotification
-from .v2_all import ItemGuardianApprovalReviewCompletedNotification
-from .v2_all import ItemGuardianApprovalReviewStartedNotification
-from .v2_all import ItemStartedNotification
-from .v2_all import McpServerEventStreamNotification
-from .v2_all import McpServerOauthLoginCompletedNotification
-from .v2_all import McpServerStatusUpdatedNotification
-from .v2_all import McpToolCallProgressNotification
-from .v2_all import ModelReroutedNotification
-from .v2_all import ModelSafetyBufferingUpdatedNotification
-from .v2_all import ModelVerificationNotification
-from .v2_all import PlanDeltaNotification
-from .v2_all import ProcessExitedNotification
-from .v2_all import ProcessOutputDeltaNotification
-from .v2_all import ProjectChangedNotification
-from .v2_all import ReasoningSummaryPartAddedNotification
-from .v2_all import ReasoningSummaryTextDeltaNotification
-from .v2_all import ReasoningTextDeltaNotification
-from .v2_all import RemoteControlStatusChangedNotification
-from .v2_all import ServerRequestResolvedNotification
-from .v2_all import SkillsChangedNotification
-from .v2_all import StrictReviewRequiredNotification
-from .v2_all import TerminalInteractionNotification
-from .v2_all import ThreadArchivedNotification
-from .v2_all import ThreadAttachmentUpdatedNotification
-from .v2_all import ThreadClosedNotification
-from .v2_all import ThreadDeletedNotification
-from .v2_all import ThreadGoalClearedNotification
-from .v2_all import ThreadGoalUpdatedNotification
-from .v2_all import ThreadNameUpdatedNotification
-from .v2_all import ThreadProjectUpdatedNotification
-from .v2_all import ThreadQueueChangedNotification
-from .v2_all import ThreadRealtimeClosedNotification
-from .v2_all import ThreadRealtimeErrorNotification
-from .v2_all import ThreadRealtimeItemAddedNotification
-from .v2_all import ThreadRealtimeItemCompletedNotification
-from .v2_all import ThreadRealtimeItemStartedNotification
-from .v2_all import ThreadRealtimeItemTranscriptDeltaNotification
-from .v2_all import ThreadRealtimeOutputAudioDeltaNotification
-from .v2_all import ThreadRealtimeSdpNotification
-from .v2_all import ThreadRealtimeStartedNotification
-from .v2_all import ThreadRealtimeTranscriptDeltaNotification
-from .v2_all import ThreadRealtimeTranscriptDoneNotification
-from .v2_all import ThreadRevertedNotification
-from .v2_all import ThreadSettingsUpdatedNotification
-from .v2_all import ThreadStartedNotification
-from .v2_all import ThreadStatusChangedNotification
-from .v2_all import ThreadTokenUsageUpdatedNotification
-from .v2_all import ThreadUnarchivedNotification
-from .v2_all import TurnCompletedNotification
-from .v2_all import TurnDiffUpdatedNotification
-from .v2_all import TurnModerationMetadataNotification
-from .v2_all import TurnPlanUpdatedNotification
-from .v2_all import TurnStartedNotification
-from .v2_all import WarningNotification
-from .v2_all import WindowsSandboxSetupCompletedNotification
-from .v2_all import WindowsWorldWritableWarningNotification
+from .v2_all import (
+    AccountLoginCompletedNotification,
+    AccountRateLimitsUpdatedNotification,
+    AccountUpdatedNotification,
+    AgentMessageDeltaNotification,
+    AppListUpdatedNotification,
+    AuthRecoveryNotification,
+    CommandExecOutputDeltaNotification,
+    CommandExecutionOutputDeltaNotification,
+    ConfigWarningNotification,
+    ContextCompactedNotification,
+    DeprecationNoticeNotification,
+    EnvironmentConnectionNotification,
+    ErrorNotification,
+    ExternalAgentConfigImportCompletedNotification,
+    ExternalAgentConfigImportProgressNotification,
+    FileChangeOutputDeltaNotification,
+    FileChangePatchUpdatedNotification,
+    FsChangedNotification,
+    FuzzyFileSearchSessionCompletedNotification,
+    FuzzyFileSearchSessionUpdatedNotification,
+    GatewayOAuthChangedNotification,
+    GuardianWarningNotification,
+    HookCompletedNotification,
+    HookStartedNotification,
+    ItemCompletedNotification,
+    ItemGuardianApprovalReviewCompletedNotification,
+    ItemGuardianApprovalReviewStartedNotification,
+    ItemStartedNotification,
+    McpServerEventStreamNotification,
+    McpServerOauthLoginCompletedNotification,
+    McpServerStatusUpdatedNotification,
+    McpToolCallProgressNotification,
+    ModelReroutedNotification,
+    ModelSafetyBufferingUpdatedNotification,
+    ModelVerificationNotification,
+    PlanDeltaNotification,
+    ProcessExitedNotification,
+    ProcessOutputDeltaNotification,
+    ProjectChangedNotification,
+    ReasoningSummaryPartAddedNotification,
+    ReasoningSummaryTextDeltaNotification,
+    ReasoningTextDeltaNotification,
+    RemoteControlStatusChangedNotification,
+    ServerRequestResolvedNotification,
+    SkillsChangedNotification,
+    StrictReviewRequiredNotification,
+    TerminalInteractionNotification,
+    ThreadArchivedNotification,
+    ThreadAttachmentUpdatedNotification,
+    ThreadClosedNotification,
+    ThreadDeletedNotification,
+    ThreadGoalClearedNotification,
+    ThreadGoalUpdatedNotification,
+    ThreadNameUpdatedNotification,
+    ThreadProjectUpdatedNotification,
+    ThreadQueueChangedNotification,
+    ThreadRealtimeClosedNotification,
+    ThreadRealtimeErrorNotification,
+    ThreadRealtimeItemAddedNotification,
+    ThreadRealtimeItemCompletedNotification,
+    ThreadRealtimeItemStartedNotification,
+    ThreadRealtimeItemTranscriptDeltaNotification,
+    ThreadRealtimeOutputAudioDeltaNotification,
+    ThreadRealtimeSdpNotification,
+    ThreadRealtimeStartedNotification,
+    ThreadRealtimeTranscriptDeltaNotification,
+    ThreadRealtimeTranscriptDoneNotification,
+    ThreadRevertedNotification,
+    ThreadSettingsUpdatedNotification,
+    ThreadStartedNotification,
+    ThreadStatusChangedNotification,
+    ThreadTokenUsageUpdatedNotification,
+    ThreadUnarchivedNotification,
+    TurnCompletedNotification,
+    TurnDiffUpdatedNotification,
+    TurnModerationMetadataNotification,
+    TurnPlanUpdatedNotification,
+    TurnStartedNotification,
+    WarningNotification,
+    WindowsSandboxSetupCompletedNotification,
+    WindowsWorldWritableWarningNotification,
+)
 
 KnownNotificationPayload: TypeAlias = (
     AccountLoginCompletedNotification

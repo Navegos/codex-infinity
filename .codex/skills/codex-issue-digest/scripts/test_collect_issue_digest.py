@@ -103,9 +103,7 @@ def test_search_issue_numbers_applies_limit_per_query(monkeypatch):
 
     queried_pages = [
         (
-            next(
-                value.removeprefix("q=") for value in args if value.startswith("q=")
-            ),
+            next(value.removeprefix("q=") for value in args if value.startswith("q=")),
             next(
                 value.removeprefix("page=")
                 for value in args

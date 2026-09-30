@@ -12,11 +12,12 @@ ensure_local_sdk_src()
 
 import asyncio
 
-from openai_codex import (
-    AsyncCodex,
-)
 from openai_codex.types import (
     ReasoningSummary,
+)
+
+from openai_codex import (
+    AsyncCodex,
 )
 
 OUTPUT_SCHEMA = {

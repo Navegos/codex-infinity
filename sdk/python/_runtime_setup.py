@@ -197,15 +197,9 @@ def _download_release_archive(version: str, temp_root: Path) -> Path:
     metadata = _release_metadata(version)
     assets = metadata.get("assets")
     if not isinstance(assets, list):
-        raise RuntimeSetupError(
-            f"Release {release_tag} returned malformed assets metadata."
-        )
+        raise RuntimeSetupError(f"Release {release_tag} returned malformed assets metadata.")
     asset = next(
-        (
-            item
-            for item in assets
-            if isinstance(item, dict) and item.get("name") == asset_name
-        ),
+        (item for item in assets if isinstance(item, dict) and item.get("name") == asset_name),
         None,
     )
     if asset is None:

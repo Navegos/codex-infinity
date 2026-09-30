@@ -224,9 +224,7 @@ def test_real_initialize_and_model_list(runtime_env: PreparedRuntimeEnv) -> None
     if data["server_name"] is not None:
         assert isinstance(data["server_name"], str) and data["server_name"].strip()
     if data["server_version"] is not None:
-        assert (
-            isinstance(data["server_version"], str) and data["server_version"].strip()
-        )
+        assert isinstance(data["server_version"], str) and data["server_version"].strip()
     assert isinstance(data["model_count"], int)
 
 
@@ -532,9 +530,7 @@ def test_real_examples_run_and_assert(
         assert "Items:" in out
     elif folder == "13_model_select_and_turn_params":
         assert (
-            "selected.model:" in out
-            and "agent.message.params:" in out
-            and "items.params:" in out
+            "selected.model:" in out and "agent.message.params:" in out and "items.params:" in out
         )
     elif folder == "14_turn_controls":
         assert "steer.result:" in out and "steer.final.status:" in out

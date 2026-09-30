@@ -2,9 +2,11 @@
 #   filename:  codex_app_server_protocol.v2.schemas.json
 
 from __future__ import annotations
-from pydantic import BaseModel, ConfigDict, Field, RootModel
-from typing import Annotated, Any, Literal
+
 from enum import Enum
+from typing import Annotated, Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 
 class CodexAppServerProtocolV2(BaseModel):

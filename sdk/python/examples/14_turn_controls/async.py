@@ -24,9 +24,7 @@ async def main() -> None:
         )
         steer_result = "sent"
         try:
-            _ = await steer_turn.steer(
-                TextInput("Keep it brief and stop after 10 numbers.")
-            )
+            _ = await steer_turn.steer(TextInput("Keep it brief and stop after 10 numbers."))
         except Exception as exc:
             steer_result = f"skipped {type(exc).__name__}"
 
@@ -45,8 +43,7 @@ async def main() -> None:
                 )
 
         steer_preview = (
-            assistant_text_from_turn(steer_completed_turn).strip()
-            or "[no assistant text]"
+            assistant_text_from_turn(steer_completed_turn).strip() or "[no assistant text]"
         )
 
         interrupt_turn = await thread.turn(
@@ -73,17 +70,14 @@ async def main() -> None:
                 )
 
         interrupt_preview = (
-            assistant_text_from_turn(interrupt_completed_turn).strip()
-            or "[no assistant text]"
+            assistant_text_from_turn(interrupt_completed_turn).strip() or "[no assistant text]"
         )
 
         print("steer.result:", steer_result.model_dump(mode="json", by_alias=True))
         print("steer.final.status:", steer_completed_status)
         print("steer.events.count:", steer_event_count)
         print("steer.assistant.preview:", steer_preview)
-        print(
-            "interrupt.result:", interrupt_result.model_dump(mode="json", by_alias=True)
-        )
+        print("interrupt.result:", interrupt_result.model_dump(mode="json", by_alias=True))
         print("interrupt.final.status:", interrupt_completed_status)
         print("interrupt.events.count:", interrupt_event_count)
         print("interrupt.assistant.preview:", interrupt_preview)

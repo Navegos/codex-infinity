@@ -11,13 +11,14 @@ ensure_local_sdk_src()
 
 import asyncio
 
-from openai_codex import (
-    AsyncCodex,
-    Sandbox,
-)
 from openai_codex.types import (
     ReasoningEffort,
     ReasoningSummary,
+)
+
+from openai_codex import (
+    AsyncCodex,
+    Sandbox,
 )
 
 REASONING_RANK = {

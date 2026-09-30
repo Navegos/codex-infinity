@@ -1141,9 +1141,10 @@ impl App {
                         pet_top_y,
                     );
                     if (message_images.is_some() || tui.message_images_visible())
-                        && let Err(err) = tui.draw_message_images(message_images) {
-                            return Err(err.into());
-                        }
+                        && let Err(err) = tui.draw_message_images(message_images)
+                    {
+                        return Err(err.into());
+                    }
                     if let Some(request) = self.chat_widget.pet_picker_preview_draw() {
                         if let Err(err) = tui.draw_pet_picker_preview_image(Some(request)) {
                             self.handle_pet_picker_preview_image_render_error(tui, err)?;

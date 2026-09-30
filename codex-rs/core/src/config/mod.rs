@@ -1648,7 +1648,6 @@ async fn config_toml_from_layers(layers: &ConfigLayerStack) -> std::io::Result<C
     }
 }
 
-
 /// Provider that serves `model` when no provider is configured explicitly.
 ///
 /// Gateway model slugs carry their provider in the slug, so the same resolution backs

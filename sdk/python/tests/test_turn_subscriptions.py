@@ -5,13 +5,13 @@ from concurrent.futures import ThreadPoolExecutor
 from itertools import chain
 
 import pytest
-
-from openai_codex import AsyncCodex
 from openai_codex._run import _collect_turn_result
 from openai_codex.api import AsyncThread, AsyncTurnHandle, Thread, TurnHandle
 from openai_codex.async_client import AsyncCodexClient
 from openai_codex.client import CodexClient
 from openai_codex.errors import TransportClosedError
+
+from openai_codex import AsyncCodex
 
 
 def turn_events(client, *, status="completed"):

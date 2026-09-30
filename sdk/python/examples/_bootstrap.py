@@ -110,9 +110,7 @@ def temporary_sample_image_path() -> Iterator[Path]:
 
 def server_label(metadata: object) -> str:
     server = getattr(metadata, "serverInfo", None)
-    server_name = (
-        (getattr(server, "name", None) or "") if server is not None else ""
-    ).strip()
+    server_name = ((getattr(server, "name", None) or "") if server is not None else "").strip()
     server_version = (
         (getattr(server, "version", None) or "") if server is not None else ""
     ).strip()

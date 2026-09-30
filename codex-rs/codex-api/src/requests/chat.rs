@@ -224,14 +224,12 @@ fn push_tool_output(
         FunctionCallOutputBody::Text(text) => text.clone(),
         FunctionCallOutputBody::ContentItems(items) => items
             .iter()
-            .filter_map(
-                |item| match item {
-                    codex_protocol::models::FunctionCallOutputContentItem::InputText {
-                        text,
-                    } => Some(text.as_str()),
-                    _ => None,
-                },
-            )
+            .filter_map(|item| match item {
+                codex_protocol::models::FunctionCallOutputContentItem::InputText { text } => {
+                    Some(text.as_str())
+                }
+                _ => None,
+            })
             .collect::<Vec<_>>()
             .join("\n"),
     };

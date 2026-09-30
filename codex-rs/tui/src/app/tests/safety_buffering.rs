@@ -832,7 +832,6 @@ goals = true
         return Ok(());
     }
 
-
     if let Some(draft) = failing_draft {
         assert_eq!(
             app.chat_widget.composer_text_with_pending(),

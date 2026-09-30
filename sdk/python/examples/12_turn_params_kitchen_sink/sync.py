@@ -10,11 +10,12 @@ from _bootstrap import ensure_local_sdk_src, runtime_config
 
 ensure_local_sdk_src()
 
-from openai_codex import (
-    Codex,
-)
 from openai_codex.types import (
     ReasoningSummary,
+)
+
+from openai_codex import (
+    Codex,
 )
 
 OUTPUT_SCHEMA = {

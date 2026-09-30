@@ -5,8 +5,11 @@ import inspect
 from pathlib import Path
 from typing import Any
 
-import openai_codex
 import openai_codex.types as public_types
+from openai_codex._initialize_metadata import validate_initialize_metadata
+from openai_codex.types import InitializeResponse
+
+import openai_codex
 from openai_codex import (
     ApprovalMode,
     AsyncCodex,
@@ -20,8 +23,6 @@ from openai_codex import (
     TurnHandle,
     TurnResult,
 )
-from openai_codex._initialize_metadata import validate_initialize_metadata
-from openai_codex.types import InitializeResponse
 
 try:
     import tomllib

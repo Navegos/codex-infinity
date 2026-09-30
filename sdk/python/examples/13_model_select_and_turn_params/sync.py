@@ -9,13 +9,14 @@ from _bootstrap import ensure_local_sdk_src, runtime_config
 
 ensure_local_sdk_src()
 
-from openai_codex import (
-    Codex,
-    Sandbox,
-)
 from openai_codex.types import (
     ReasoningEffort,
     ReasoningSummary,
+)
+
+from openai_codex import (
+    Codex,
+    Sandbox,
 )
 
 REASONING_RANK = {

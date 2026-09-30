@@ -2296,7 +2296,6 @@ async fn load_bootstrap_config_or_exit(
     }
 }
 
-
 fn should_show_onboarding(
     login_status: LoginStatus,
     requires_openai_auth: bool,

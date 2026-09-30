@@ -316,7 +316,7 @@ impl SqliteConfig {
             .filename(path)
             .create_if_missing(true)
             .synchronous(SqliteSynchronous::Normal)
-             .busy_timeout(SQLITE_BUSY_TIMEOUT)
+            .busy_timeout(SQLITE_BUSY_TIMEOUT)
             .log_statements(LevelFilter::Off);
         // SQLx retries after_connect errors, eventually replacing them with PoolTimedOut.
         // Return the first initialization error directly while opening this pool.

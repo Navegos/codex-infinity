@@ -75,8 +75,18 @@ PACKAGE_NATIVE_COMPONENTS: dict[str, list[str]] = {
     "codex-linux-arm64": ["codex", "rg"],
     "codex-darwin-x64": ["codex", "rg"],
     "codex-darwin-arm64": ["codex", "rg"],
-    "codex-win32-x64": ["codex", "rg", "codex-windows-sandbox-setup", "codex-command-runner"],
-    "codex-win32-arm64": ["codex", "rg", "codex-windows-sandbox-setup", "codex-command-runner"],
+    "codex-win32-x64": [
+        "codex",
+        "rg",
+        "codex-windows-sandbox-setup",
+        "codex-command-runner",
+    ],
+    "codex-win32-arm64": [
+        "codex",
+        "rg",
+        "codex-windows-sandbox-setup",
+        "codex-command-runner",
+    ],
     "codex-responses-api-proxy": ["codex-responses-api-proxy"],
     "codex-sdk": [],
 }
@@ -364,7 +374,9 @@ def copy_native_binaries(
     if not vendor_src.exists():
         raise RuntimeError(f"Vendor source directory not found: {vendor_src}")
 
-    components_set = {component for component in components if component in COMPONENT_DEST_DIR}
+    components_set = {
+        component for component in components if component in COMPONENT_DEST_DIR
+    }
     if not components_set:
         return
 
@@ -426,7 +438,6 @@ def copy_native_binaries(
             )
 
 
-
 def validate_codex_package_dir(package_dir: Path) -> None:
     is_windows = "windows" in package_dir.name
     required_files = [
@@ -453,7 +464,9 @@ def validate_codex_package_dir(package_dir: Path) -> None:
     ]
     if missing_files:
         missing = ", ".join(missing_files)
-        raise RuntimeError(f"Missing files in Codex package directory {package_dir}: {missing}")
+        raise RuntimeError(
+            f"Missing files in Codex package directory {package_dir}: {missing}"
+        )
 
 
 def run_npm_pack(staging_dir: Path, output_path: Path) -> Path:

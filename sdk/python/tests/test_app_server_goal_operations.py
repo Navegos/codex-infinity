@@ -7,12 +7,12 @@ from app_server_harness import (
     sse,
 )
 from app_server_helpers import agent_message_texts
-
-from openai_codex import Codex
 from openai_codex._goal import _GoalNotificationStream
 from openai_codex._run import _collect_turn_result
 from openai_codex.generated.notification_registry import notification_turn_id
 from openai_codex.generated.v2_all import TurnStatus
+
+from openai_codex import Codex
 
 
 def test_private_goal_operation_coalesces_runtime_continuations(tmp_path) -> None:

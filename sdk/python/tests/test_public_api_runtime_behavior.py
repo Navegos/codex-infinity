@@ -6,9 +6,8 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
-import pytest
-
 import openai_codex.api as public_api_module
+import pytest
 from openai_codex.api import (
     ApprovalMode,
     AsyncCodex,

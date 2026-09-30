@@ -17,8 +17,7 @@ fn layout_stacks_thumbnails_above_bottom() {
     let square = dir.path().join("square.png");
     write_png(&square, 64, 64);
     // 24 cols * 64/64 / 2 = 12 rows, clamped to 8.
-    let placements =
-        layout_message_images(wide_area(), 40, std::slice::from_ref(&square));
+    let placements = layout_message_images(wide_area(), 40, std::slice::from_ref(&square));
     assert_eq!(placements.len(), 1);
     let placement = &placements[0];
     assert_eq!(placement.path, square);
