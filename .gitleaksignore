@@ -1,0 +1,2 @@
+# Upstream's localhost WebSocket authentication test uses a synthetic fixture.
+2210190435febb8fad3e517ce82bd18b8fecf8f3:codex-rs/cli/tests/exec_server_websocket_auth.rs:generic-api-key:40
