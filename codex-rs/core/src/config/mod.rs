@@ -1658,7 +1658,7 @@ fn model_provider_id_for_model(model: &str) -> &'static str {
         DEEPSEEK_PROVIDER_ID
     } else if model.starts_with("openrouter/") {
         OPENROUTER_PROVIDER_ID
-    } else if model.starts_with("openpaths/") {
+    } else if model.starts_with("openpaths/") || model.ends_with("-exp") {
         OPENPATHS_PROVIDER_ID
     } else {
         OPENAI_PROVIDER_ID

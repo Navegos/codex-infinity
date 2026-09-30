@@ -104,6 +104,14 @@ pub fn is_deepseek_slug(slug: &str) -> bool {
     )
 }
 
+/// Slugs the fork serves locally with wide-context metadata rather than a generic fallback.
+///
+/// Distinct from [`is_deepseek_slug`], which only drives provider routing: OpenRouter-hosted
+/// slugs are namespaced and must keep ordinary fallback metadata.
+fn is_local_wide_context_slug(slug: &str) -> bool {
+    is_deepseek_slug(slug) || slug.starts_with("openpaths/") || slug.ends_with("-exp")
+}
+
 /// Provider prefix that selects the built-in OpenRouter provider. It is a Codex-side
 /// namespace: OpenRouter ids start at the vendor segment, so the prefix never reaches it.
 const OPENROUTER_SLUG_PREFIX: &str = "openrouter/";
@@ -142,7 +150,7 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
 /// Catalog entries that the fork owns (see `crate::gateway_models`) start from the same
 /// descriptor but are known models, so neither the warning nor the fallback marker applies.
 pub(crate) fn fallback_model_info(slug: &str) -> ModelInfo {
-    let is_deepseek = is_deepseek_slug(slug);
+    let is_deepseek = is_local_wide_context_slug(slug);
     // Callers that serve the slug decide whether it counts as unknown metadata.
     let mut model = ModelInfo {
         used_fallback_model_metadata: false,
