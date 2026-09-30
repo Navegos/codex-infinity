@@ -64,6 +64,8 @@ impl App {
             items,
             cwd,
             active_permission_profile,
+            approval_policy,
+            approvals_reviewer,
             model: turn_model,
             effort,
             collaboration_mode,
@@ -184,7 +186,7 @@ impl App {
         let retry_display = ChatWidget::user_message_display_from_inputs(items);
 
         self.config = retry_config.clone();
-        let selected_profile = self.confirmed_server_profile(thread_id);
+        let selected_profile = self.selected_server_profile(thread_id);
         let started = app_server
             .fork_thread_at(
                 &self.local_settings,
@@ -204,6 +206,9 @@ impl App {
             }
         };
         let retry_thread_id = started.session.thread_id;
+        *approval_policy = started.session.approval_policy;
+        *approvals_reviewer = Some(started.session.approvals_reviewer);
+        *active_permission_profile = started.session.active_permission_profile.clone();
 
         self.detach_current_thread_for_navigation(app_server, Some(retry_thread_id))
             .await;
@@ -220,6 +225,9 @@ impl App {
             return;
         }
 
+        if selected_profile.is_some() {
+            self.adopt_inherited_server_selection();
+        }
         let failure_input_state = input_state.clone();
         self.chat_widget.restore_thread_input_state(
             input_state,
