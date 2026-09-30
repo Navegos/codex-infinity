@@ -72,9 +72,8 @@ pub(crate) use stdin_approval::TerminalSandboxSource;
 
 pub(crate) const MIN_YIELD_TIME_MS: u64 = 250;
 pub(crate) const WINDOWS_INITIAL_EXEC_YIELD_TIME_FLOOR_MS: u64 = 10_000;
-// Minimum yield time for an empty `write_stdin`. Kept long so background
-// polls wait minutes, not seconds: each poll costs a full model turn.
-pub(crate) const MIN_EMPTY_YIELD_TIME_MS: u64 = 30_000;
+// Explicit short polls remain available for interactive sessions.
+pub(crate) const MIN_EMPTY_YIELD_TIME_MS: u64 = 5_000;
 // Maximum single wait for exec output. Long enough for most builds/tests to
 // finish in one call instead of a polling loop.
 pub(crate) const MAX_YIELD_TIME_MS: u64 = 120_000;

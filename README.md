@@ -117,7 +117,7 @@ codex-infinity --auto-next-goal "/goal improve benchmark coverage"
 codex-infinity --yolo "add error handling to all API endpoints"
 
 # Use a specific model
-codex-infinity -m gpt-5.4 --auto-next-steps "optimize database queries"
+codex-infinity -m gpt-6.1-sol --auto-next-steps "optimize database queries"
 
 # Use local models
 codex-infinity --oss -m llama3 "explain this codebase"
@@ -138,9 +138,9 @@ codex-infinity --oss -m llama3 "explain this codebase"
 ### Build from source (Rust CLI)
 
 ```bash
-cd codex-rs
-cargo build --release -p codex-tui
-./target/release/codex "your prompt here"
+just assemble-codex-package --target x86_64-unknown-linux-gnu \
+  --cargo-profile release --package-dir /tmp/codex-infinity-package
+/tmp/codex-infinity-package/bin/codex "your prompt here"
 ```
 
 ### Fast dev builds

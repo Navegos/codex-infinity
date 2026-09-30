@@ -25,8 +25,8 @@ struct WriteStdinArgs {
     session_id: i32,
     #[serde(default)]
     chars: String,
-    #[serde(default = "super::default_write_stdin_yield_time_ms")]
-    yield_time_ms: u64,
+    #[serde(default)]
+    yield_time_ms: Option<u64>,
     #[serde(default)]
     max_output_tokens: Option<usize>,
 }
@@ -79,6 +79,9 @@ impl WriteStdinHandler {
         };
 
         let args: WriteStdinArgs = parse_arguments(&arguments)?;
+        let yield_time_ms =
+            args.yield_time_ms
+                .unwrap_or(if args.chars.is_empty() { 30_000 } else { 250 });
         let context =
             UnifiedExecContext::new(session.clone(), step_context, cancellation_token, call_id);
         let response = session
@@ -89,7 +92,7 @@ impl WriteStdinHandler {
                 WriteStdinRequest {
                     process_id: args.session_id,
                     input: &args.chars,
-                    yield_time_ms: args.yield_time_ms,
+                    yield_time_ms,
                     max_output_tokens: args.max_output_tokens,
                     truncation_policy: context
                         .step_context

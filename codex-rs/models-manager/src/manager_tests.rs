@@ -776,7 +776,7 @@ async fn get_model_info_tracks_fallback_usage() {
 }
 
 #[tokio::test]
-async fn get_model_info_applies_long_context_override_to_bundled_gpt_5_6_models() {
+async fn get_model_info_applies_long_context_override_to_bundled_models() {
     let codex_home = tempdir().expect("temp dir");
     let manager = openai_manager_for_tests(
         codex_home.path().to_path_buf(),
@@ -787,7 +787,13 @@ async fn get_model_info_applies_long_context_override_to_bundled_gpt_5_6_models(
         ..Default::default()
     };
 
-    for slug in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+    for slug in [
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-6.1-sol",
+        "gpt-6-sol",
+    ] {
         let model_info = manager.get_model_info(slug, &config).await;
         let mut expected = manager
             .get_model_info(slug, &ModelsManagerConfig::default())
@@ -1716,11 +1722,17 @@ fn bundled_models_json_roundtrips() {
 }
 
 #[test]
-fn gpt_5_6_prompts_are_concise_and_require_end_to_end_completion() {
+fn bundled_prompts_are_concise_and_require_end_to_end_completion() {
     let response = crate::bundled_models_response()
         .unwrap_or_else(|err| panic!("bundled models.json should parse: {err}"));
 
-    for slug in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+    for slug in [
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-6.1-sol",
+        "gpt-6-sol",
+    ] {
         let model = response
             .models
             .iter()

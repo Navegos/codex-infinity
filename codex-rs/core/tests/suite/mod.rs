@@ -55,6 +55,8 @@ mod approvals;
 mod audio_truncation;
 mod auth_recovery_policy;
 mod auto_review;
+#[path = "background_poll_tests.rs"]
+mod background_poll;
 #[path = "bedrock_multi_agent_tests.rs"]
 mod bedrock_multi_agent;
 mod catalog_permission_messages;
@@ -164,6 +166,8 @@ mod plugins;
 mod prompt_cache_key;
 mod prompt_caching;
 mod prompt_debug_tests;
+#[path = "provider_model_switch_tests.rs"]
+mod provider_model_switch;
 mod quota_exceeded;
 mod realtime_conversation;
 mod realtime_initial_items;

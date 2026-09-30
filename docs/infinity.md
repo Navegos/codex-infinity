@@ -77,3 +77,33 @@ explicitly instead of routing to the wrong tool.
 Rust callers constructing raw `ChatRequest` values should use `ChatRequest::new(body,
 headers)`; requests now retain private tool-routing metadata. `ChatRequestBuilder`
 configures that metadata automatically for adapted Codex tools.
+
+## GPT-6.1 Sol and concise prompts
+
+Select the model with `codex -m gpt-6.1-sol`, or set `model = "gpt-6.1-sol"`
+in your Codex `config.toml`. The bundled catalog includes the concise Infinity
+prompt for GPT-6.1 Sol and keeps the model's code-mode tool settings.
+Switches within one provider preserve its active endpoint and headers. Gateway
+model slugs select their provider unless a provider is explicitly pinned.
+
+A refreshed backend catalog supplies its own instructions. To keep the concise
+prompt after catalog refreshes, save the bundled model's `instructions_template`
+to a local file and set the top-level `model_instructions_file` to its absolute
+path. This overrides base instructions while preserving catalog tool and safety
+messages. Remove this setting to use the backend's base instructions again.
+
+Build and deploy both `codex` and `codex-code-mode-host` from the same commit:
+
+```sh
+just assemble-codex-package --target x86_64-unknown-linux-gnu \
+  --cargo-profile release --package-dir /tmp/codex-infinity-package
+```
+
+The package builder verifies and downloads the pinned Codex V8 artifacts for
+the code-mode host. Keep the executables together so Codex can find the host.
+Updating the installed binaries takes effect for newly started sessions.
+
+Empty background polls default to 30 seconds to reduce model turns. Explicit
+short waits remain available, with a five-second minimum; stdin writes default
+to 250 milliseconds. Setting a provider's `stream_max_retries = 0` disables
+automatic sampling retries, including waits for usage resets and overloads.

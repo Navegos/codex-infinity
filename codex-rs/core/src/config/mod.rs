@@ -1676,7 +1676,12 @@ impl Config {
         if self.model_provider_pinned {
             return None;
         }
-        self.model_providers.get(model_provider_id_for_model(model))
+        let provider_id = model_provider_id_for_model(model);
+        if provider_id == self.model_provider_id {
+            Some(&self.model_provider)
+        } else {
+            self.model_providers.get(provider_id)
+        }
     }
 
     /// Resolves the configured, reviewer-catalog, or bundled Guardian policy.

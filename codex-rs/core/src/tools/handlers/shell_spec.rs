@@ -131,7 +131,7 @@ pub fn create_write_stdin_tool() -> ToolSpec {
         (
             "yield_time_ms".to_string(),
             JsonSchema::number(Some(
-                "Wait before yielding output. Non-empty writes default to 250 ms and cap at 120000 ms; empty polls wait 30000-300000 ms by default. Prefer longer waits (minutes) to avoid busy polling — each poll costs a full model turn.".to_string(),
+                "Wait before yielding output. Non-empty writes default to 250 ms and cap at 120000 ms; empty polls default to 30000 ms with a 5000-300000 ms range. Prefer longer waits (minutes) to avoid busy polling — each poll costs a full model turn.".to_string(),
             )),
         ),
         (

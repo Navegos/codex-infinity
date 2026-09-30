@@ -1709,6 +1709,9 @@ async fn run_sampling_request(
                     if let Some(rate_limits) = rate_limits {
                         sess.update_rate_limits(&turn_context, *rate_limits).await;
                     }
+                    if max_retries == 0 {
+                        return Err(err);
+                    }
                     wait_for_usage_limit_reset_if_applicable(
                         sess.as_ref(),
                         turn_context.as_ref(),
@@ -1719,6 +1722,9 @@ async fn run_sampling_request(
                     continue;
                 }
                 CodexErrorDetails::ServerOverloaded => {
+                    if max_retries == 0 {
+                        return Err(err);
+                    }
                     wait_for_server_overload_retry(
                         &mut retry_state,
                         sess.as_ref(),
