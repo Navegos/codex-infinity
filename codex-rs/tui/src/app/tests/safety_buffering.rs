@@ -324,8 +324,16 @@ stream_max_retries = 0
         app.handle_app_server_event(&app_server, event).await;
         if let Some(client_id) = committed_id {
             let saved_input = if via_overview {
-                assert!(!app.thread_event_channels.contains_key(&thread_id));
-                app.agents_overview.input_states.get(&thread_id).cloned()
+                // The overview owns the background thread's saved draft. Its event channel
+                // does not stay absent: an `McpServerStatusUpdated` notification re-attaches
+                // background threads by design, so assert the routing, not the channel.
+                Some(
+                    app.agents_overview
+                        .input_states
+                        .get(&thread_id)
+                        .cloned()
+                        .expect("agents overview retains the background thread's draft"),
+                )
             } else {
                 let store = app.thread_event_channels[&thread_id].store.lock().await;
                 assert!(store.buffer.is_empty());
