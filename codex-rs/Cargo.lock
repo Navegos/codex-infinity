@@ -2021,8 +2021,10 @@ name = "codex-ansi-escape"
 version = "0.156.1"
 dependencies = [
  "ansi-to-tui",
+ "pretty_assertions",
  "ratatui",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -4268,6 +4270,7 @@ dependencies = [
  "codex-utils-path-uri",
  "codex-utils-redacted-string",
  "codex-utils-string",
+ "derive_more 2.1.1",
  "encoding_rs",
  "gix-url",
  "globset",
@@ -4429,6 +4432,7 @@ dependencies = [
  "codex-utils-absolute-path",
  "codex-utils-path",
  "codex-utils-process",
+ "memchr",
  "pretty_assertions",
  "regex",
  "serde",
