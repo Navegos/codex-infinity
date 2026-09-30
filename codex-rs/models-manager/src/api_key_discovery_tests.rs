@@ -26,12 +26,13 @@ async fn api_key_discovery_disabled_preserves_command_auth_discovery_and_merging
     );
     let mut merged = load_remote_models_from_file().unwrap();
     merged.extend(models.clone());
+    let expected = with_gateway_models(merged);
     assert_eq!(
         manager
             .raw_model_catalog(RefreshStrategy::Online, DEFAULT_HTTP_CLIENT_FACTORY)
             .await
             .models,
-        merged
+        expected
     );
     assert_eq!(endpoint.fetch_count(), 1);
 }
@@ -44,7 +45,7 @@ async fn api_key_discovery_startup_flag_controls_fetches_and_cached_catalogs() {
     let auth = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("test-key"));
     let manager =
         OpenAiModelsManager::new(home.path().into(), endpoint.clone(), Some(auth.clone()));
-    let bundled = load_remote_models_from_file().unwrap();
+    let bundled = with_gateway_models(load_remote_models_from_file().unwrap());
 
     for strategy in [
         RefreshStrategy::Online,
@@ -69,7 +70,7 @@ async fn api_key_discovery_startup_flag_controls_fetches_and_cached_catalogs() {
             .raw_model_catalog(RefreshStrategy::Online, DEFAULT_HTTP_CLIENT_FACTORY)
             .await
             .models,
-        models
+        with_gateway_models(models.clone())
     );
     assert_eq!(endpoint.fetch_count(), 1);
 
@@ -78,17 +79,21 @@ async fn api_key_discovery_startup_flag_controls_fetches_and_cached_catalogs() {
         let restarted =
             OpenAiModelsManager::new(home.path().into(), endpoint.clone(), Some(auth.clone()));
         restarted.set_api_key_model_discovery_enabled(enabled);
-        let expected = if enabled { &models } else { &bundled };
+        let expected = if enabled {
+            with_gateway_models(models.clone())
+        } else {
+            bundled.clone()
+        };
         for strategy in [RefreshStrategy::Offline, RefreshStrategy::OnlineIfUncached] {
             assert_eq!(
                 &restarted
                     .raw_model_catalog(strategy, DEFAULT_HTTP_CLIENT_FACTORY)
                     .await
                     .models,
-                expected
+                &expected
             );
         }
-        assert_eq!(&restarted.try_get_remote_models().unwrap(), expected);
+        assert_eq!(&restarted.try_get_remote_models().unwrap(), &expected);
     }
     assert_eq!(endpoint.fetch_count(), 1);
 }

@@ -1236,6 +1236,68 @@ async fn openpaths_model_automatically_selects_native_provider() {
 }
 
 #[tokio::test]
+async fn model_provider_for_model_follows_the_slug_when_no_provider_is_pinned() {
+    let config = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides {
+            model: Some("gpt-6-sol".into()),
+            ..Default::default()
+        },
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("load config");
+
+    assert!(!config.model_provider_pinned);
+    assert_eq!(
+        config
+            .model_provider_for_model("openrouter/mimo-v2.6-pro")
+            .and_then(|provider| provider.base_url.as_deref()),
+        Some("https://openrouter.ai/api/v1")
+    );
+    assert_eq!(
+        config
+            .model_provider_for_model("openpaths/openpaths-free")
+            .and_then(|provider| provider.base_url.as_deref()),
+        Some("https://openpaths.io/v1")
+    );
+    assert_eq!(
+        config
+            .model_provider_for_model("deepseek-v4-pro")
+            .map(|provider| provider.env_key.as_deref()),
+        Some(Some("DEEPSEEK_API_KEY"))
+    );
+    assert_eq!(
+        config.model_provider_for_model("gpt-6-sol"),
+        Some(&config.model_provider)
+    );
+}
+
+#[tokio::test]
+async fn pinned_model_provider_survives_a_model_switch() {
+    let config = Config::load_from_base_config_with_overrides(
+        ConfigToml {
+            model_provider: Some("openpaths".into()),
+            ..Default::default()
+        },
+        ConfigOverrides {
+            model: Some("openrouter/mimo-v2.6-pro".into()),
+            ..Default::default()
+        },
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("load config");
+
+    assert!(config.model_provider_pinned);
+    assert_eq!(config.model_provider_id, "openpaths");
+    assert_eq!(
+        config.model_provider_for_model("openrouter/mimo-v2.6-pro"),
+        None
+    );
+}
+
+#[tokio::test]
 async fn load_config_applies_amazon_bedrock_transport_overrides() {
     let cfg = toml::from_str::<ConfigToml>(
         r#"

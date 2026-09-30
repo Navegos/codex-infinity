@@ -82,6 +82,11 @@ fn remote_model_with_visibility(
         .expect("valid model")
 }
 
+/// The catalog the manager publishes: whatever the endpoint or the bundled file supplied,
+/// plus the gateway models this fork owns.
+fn with_gateway_models(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
+    crate::gateway_models::merge_gateway_models(models)
+}
 fn assert_models_contain(actual: &[ModelInfo], expected: &[ModelInfo]) {
     for model in expected {
         assert!(
@@ -458,9 +463,12 @@ async fn manager_without_cache_fetches_on_every_refresh() {
         )
         .await;
 
-    assert_eq!(catalog.models, remote_models);
+    assert_eq!(catalog.models, with_gateway_models(remote_models.clone()));
     assert_eq!(second_catalog, catalog);
-    assert_eq!(manager.get_remote_models().await, remote_models);
+    assert_eq!(
+        manager.get_remote_models().await,
+        with_gateway_models(remote_models)
+    );
     assert_eq!(endpoint.fetch_count(), 2);
 }
 
@@ -492,7 +500,7 @@ async fn injected_cache_hit_avoids_remote_fetch() {
         )
         .await;
 
-    assert_eq!(catalog.models, cached_models);
+    assert_eq!(catalog.models, with_gateway_models(cached_models));
     assert_eq!(endpoint.fetch_count(), 0);
 }
 
@@ -516,7 +524,7 @@ async fn injected_cache_read_error_falls_back_and_persists_remote_models() {
         )
         .await;
 
-    assert_eq!(catalog.models, remote_models);
+    assert_eq!(catalog.models, with_gateway_models(remote_models.clone()));
     assert_eq!(endpoint.fetch_count(), 1);
     let stored_entries = cache.stored_entries();
     assert_eq!(
@@ -551,7 +559,7 @@ async fn injected_cache_write_error_does_not_fail_remote_refresh() {
         )
         .await;
 
-    assert_eq!(catalog.models, remote_models);
+    assert_eq!(catalog.models, with_gateway_models(remote_models.clone()));
     assert_eq!(endpoint.fetch_count(), 1);
 }
 
@@ -921,7 +929,10 @@ async fn refresh_available_models_uses_remote_only_catalog_for_chatgpt_auth() {
         .await
         .expect("refresh succeeds");
 
-    assert_eq!(manager.get_remote_models().await, remote_models);
+    assert_eq!(
+        manager.get_remote_models().await,
+        with_gateway_models(remote_models)
+    );
     assert_eq!(endpoint.fetch_count(), 1, "expected a single model fetch");
 }
 
@@ -957,7 +968,10 @@ async fn refresh_available_models_uses_cached_remote_only_catalog_for_chatgpt_au
         .await
         .expect("cached refresh succeeds");
 
-    assert_eq!(cache_manager.get_remote_models().await, remote_models);
+    assert_eq!(
+        cache_manager.get_remote_models().await,
+        with_gateway_models(remote_models)
+    );
     assert_eq!(
         cache_endpoint.fetch_count(),
         0,
@@ -1003,7 +1017,8 @@ async fn refresh_available_models_preserves_bundled_catalog_for_empty_chatgpt_re
     let codex_home = tempdir().expect("temp dir");
     let endpoint = TestModelsEndpoint::new(vec![Vec::new()]);
     let manager = openai_manager_for_tests(codex_home.path().to_path_buf(), endpoint);
-    let expected = load_remote_models_from_file().expect("bundled models should parse");
+    let expected =
+        with_gateway_models(load_remote_models_from_file().expect("bundled models should parse"));
 
     manager
         .refresh_available_models(
@@ -1027,8 +1042,8 @@ async fn refresh_available_models_merges_hidden_only_chatgpt_remote_with_bundled
     let codex_home = tempdir().expect("temp dir");
     let endpoint = TestModelsEndpoint::new(vec![vec![hidden_remote.clone()]]);
     let manager = openai_manager_for_tests(codex_home.path().to_path_buf(), endpoint);
-    let mut expected = load_remote_models_from_file().expect("bundled models should parse");
-    expected.push(hidden_remote);
+    let mut bundled = load_remote_models_from_file().expect("bundled models should parse");
+    bundled.push(hidden_remote);
 
     manager
         .refresh_available_models(
@@ -1038,7 +1053,10 @@ async fn refresh_available_models_merges_hidden_only_chatgpt_remote_with_bundled
         .await
         .expect("refresh succeeds");
 
-    assert_eq!(manager.get_remote_models().await, expected);
+    assert_eq!(
+        manager.get_remote_models().await,
+        with_gateway_models(bundled)
+    );
 }
 
 #[tokio::test]
@@ -1064,8 +1082,8 @@ async fn refresh_available_models_keeps_merging_for_custom_api_auth() {
             "test-api-key",
         ))),
     );
-    let mut expected = load_remote_models_from_file().expect("bundled models should parse");
-    expected.extend(remote_models);
+    let mut bundled = load_remote_models_from_file().expect("bundled models should parse");
+    bundled.extend(remote_models);
 
     manager
         .refresh_available_models(
@@ -1075,7 +1093,10 @@ async fn refresh_available_models_keeps_merging_for_custom_api_auth() {
         .await
         .expect("refresh succeeds");
 
-    assert_eq!(manager.get_remote_models().await, expected);
+    assert_eq!(
+        manager.get_remote_models().await,
+        with_gateway_models(bundled)
+    );
     assert_eq!(endpoint.fetch_count(), 1, "expected a single model fetch");
 }
 
@@ -1142,13 +1163,24 @@ async fn online_refresh_updates_access_programs_with_unchanged_etag() {
     for model in [granted_model, revoked_model] {
         let mut expected = ModelPreset::from(model.clone());
         expected.is_default = true;
+        let gateway_presets = with_gateway_models(Vec::new())
+            .into_iter()
+            .map(ModelPreset::from)
+            .collect::<Vec<_>>();
         assert_eq!(
             manager
                 .list_models(RefreshStrategy::Online, DEFAULT_HTTP_CLIENT_FACTORY)
                 .await,
-            vec![expected.clone()]
+            std::iter::once(expected.clone())
+                .chain(gateway_presets.clone())
+                .collect::<Vec<_>>()
         );
-        assert_eq!(manager.get_remote_models().await, vec![model]);
+        assert_eq!(
+            manager.get_remote_models().await,
+            std::iter::once(model.clone())
+                .chain(with_gateway_models(Vec::new()))
+                .collect::<Vec<_>>()
+        );
         assert_eq!(
             manager.remote_models.read().await.etag.as_deref(),
             Some("stable-catalog-etag")
@@ -1165,7 +1197,9 @@ async fn online_refresh_updates_access_programs_with_unchanged_etag() {
                     DEFAULT_HTTP_CLIENT_FACTORY
                 )
                 .await,
-            vec![expected]
+            std::iter::once(expected)
+                .chain(gateway_presets)
+                .collect::<Vec<_>>()
         );
         assert_eq!(cache_endpoint.fetch_count(), 0);
         assert_eq!(
@@ -1451,11 +1485,11 @@ async fn refresh_available_models_fetches_when_external_api_key_overrides_chatgp
 
     assert_eq!(
         cached_remote,
-        vec![remote_model(
+        with_gateway_models(vec![remote_model(
             dynamic_slug,
             "External API Key",
             /*priority*/ 1
-        )]
+        )])
     );
     assert_eq!(endpoint.fetch_count(), 1);
 }
@@ -1654,4 +1688,47 @@ fn gpt_5_6_prompts_are_concise_and_require_end_to_end_completion() {
             "{slug} prompt should require end-to-end completion"
         );
     }
+}
+
+#[tokio::test]
+async fn authoritative_backend_catalog_still_exposes_the_gateway_models() {
+    let codex_home = tempdir().expect("temp dir");
+    let endpoint = TestModelsEndpoint::new(vec![vec![remote_model(
+        "gpt-6-astra",
+        "GPT-6-Astra",
+        /*priority*/ 1,
+    )]]);
+    let manager = openai_manager_for_tests(codex_home.path().to_path_buf(), endpoint);
+
+    let picker = manager
+        .list_models(RefreshStrategy::Online, DEFAULT_HTTP_CLIENT_FACTORY)
+        .await;
+
+    assert_eq!(
+        manager
+            .get_remote_models()
+            .await
+            .iter()
+            .map(|model| model.slug.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "gpt-6-astra",
+            "openrouter/mimo-v2.6-pro",
+            "openrouter/space-bunny-alpha",
+            "openpaths/openpaths-free",
+        ]
+    );
+    assert_eq!(
+        picker
+            .iter()
+            .filter(|preset| preset.show_in_picker)
+            .map(|preset| preset.model.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "gpt-6-astra",
+            "openrouter/mimo-v2.6-pro",
+            "openrouter/space-bunny-alpha",
+            "openpaths/openpaths-free",
+        ]
+    );
 }

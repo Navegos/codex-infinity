@@ -5877,6 +5877,71 @@ async fn session_settings_commit_keeps_snapshot_across_postcommit_wait() {
 }
 
 #[tokio::test]
+async fn switching_models_rebinds_the_provider_named_by_the_model_slug() {
+    let (session, _turn_context, _rx) = make_session_and_context_with_auth_and_config_and_rx(
+        CodexAuth::from_api_key("Test API Key"),
+        Vec::new(),
+        |_| {},
+    )
+    .await;
+    let switch_to = |model: &str| SessionSettingsUpdate {
+        step_settings: StepSettingsUpdate {
+            model: Some(model.to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let gateway = session
+        .update_settings(switch_to("openpaths/openpaths-free"))
+        .await
+        .expect("switch to the OpenPaths free router");
+    assert_eq!(gateway.configuration.provider.info().name, "OpenPaths");
+
+    let openrouter = session
+        .update_settings(switch_to("openrouter/space-bunny-alpha"))
+        .await
+        .expect("switch to an OpenRouter model");
+    assert_eq!(openrouter.configuration.provider.info().name, "OpenRouter");
+
+    let openai = session
+        .update_settings(switch_to("gpt-5.6-sol"))
+        .await
+        .expect("switch back to an OpenAI model");
+    assert_eq!(openai.configuration.provider.info().name, "OpenAI");
+}
+
+#[tokio::test]
+async fn switching_models_keeps_a_configured_provider() {
+    let (session, _turn_context, _rx) = make_session_and_context_with_auth_and_config_and_rx(
+        CodexAuth::from_api_key("Test API Key"),
+        Vec::new(),
+        |config| {
+            config.model_provider = config.model_providers["openpaths"].clone();
+            config.model_provider_id = "openpaths".to_string();
+            config.model_provider_pinned = true;
+        },
+    )
+    .await;
+
+    let commit = session
+        .update_settings(SessionSettingsUpdate {
+            step_settings: StepSettingsUpdate {
+                model: Some("openrouter/space-bunny-alpha".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await
+        .expect("model switch");
+
+    assert_eq!(
+        commit.configuration.provider.info().base_url.as_deref(),
+        Some("https://openpaths.io/v1")
+    );
+}
+
+#[tokio::test]
 async fn session_update_settings_does_not_rewrite_sticky_environment_cwds() {
     let (session, turn_context) = make_session_and_context().await;
     #[allow(deprecated)]

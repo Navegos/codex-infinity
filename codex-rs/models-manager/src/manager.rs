@@ -315,7 +315,9 @@ impl OpenAiModelsManager {
         endpoint_client: Arc<dyn ModelsEndpointClient>,
         auth_manager: Option<Arc<AuthManager>>,
     ) -> Self {
-        let remote_models = load_remote_models_from_file().unwrap_or_default();
+        let remote_models = crate::gateway_models::merge_gateway_models(
+            load_remote_models_from_file().unwrap_or_default(),
+        );
         Self {
             remote_models: RwLock::new(ModelsCacheEntry {
                 fetched_at: Utc::now(),
@@ -599,6 +601,9 @@ impl OpenAiModelsManager {
             }
             entry.models = models;
         }
+        // The backend catalog is authoritative for ChatGPT auth, so gateway models the fork
+        // owns are merged in afterwards rather than baked into the bundled catalog.
+        entry.models = crate::gateway_models::merge_gateway_models(entry.models);
         *current = entry;
         true
     }

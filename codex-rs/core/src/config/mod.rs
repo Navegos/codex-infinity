@@ -93,6 +93,7 @@ use codex_model_provider_info::DEEPSEEK_PROVIDER_ID;
 use codex_model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
+use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_model_provider_info::OPENPATHS_PROVIDER_ID;
 use codex_model_provider_info::OPENROUTER_PROVIDER_ID;
 use codex_model_provider_info::built_in_model_providers;
@@ -649,6 +650,10 @@ pub struct Config {
 
     /// Key into the model_providers map that specifies which provider to use.
     pub model_provider_id: String,
+
+    /// Whether the active provider was selected explicitly rather than inferred from the
+    /// model slug. An explicit selection survives a mid-session model switch.
+    pub model_provider_pinned: bool,
 
     /// Info needed to make an API request to the model.
     pub model_provider: ModelProviderInfo,
@@ -1550,9 +1555,36 @@ impl ConfigBuilder {
     }
 }
 
+/// Provider that serves `model` when no provider is configured explicitly.
+///
+/// Gateway model slugs carry their provider in the slug, so the same resolution backs
+/// `Config::model_provider_for_model` for a mid-session model switch.
+fn model_provider_id_for_model(model: &str) -> &'static str {
+    if codex_models_manager::model_info::is_deepseek_slug(model) {
+        DEEPSEEK_PROVIDER_ID
+    } else if model.starts_with("openrouter/") {
+        OPENROUTER_PROVIDER_ID
+    } else if model.starts_with("openpaths/") {
+        OPENPATHS_PROVIDER_ID
+    } else {
+        OPENAI_PROVIDER_ID
+    }
+}
+
 impl Config {
     pub fn sqlite_config(&self) -> &codex_state::SqliteConfig {
         &self.sqlite
+    }
+
+    /// Provider that serves `model` when the provider was inferred rather than pinned.
+    ///
+    /// Returns `None` for a pinned provider, so a configured provider keeps serving
+    /// whatever model the session selects.
+    pub fn model_provider_for_model(&self, model: &str) -> Option<&ModelProviderInfo> {
+        if self.model_provider_pinned {
+            return None;
+        }
+        self.model_providers.get(model_provider_id_for_model(model))
     }
 
     /// Resolves the configured, reviewer-catalog, or bundled Guardian policy.
@@ -3789,28 +3821,18 @@ impl Config {
                 .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message))?;
 
         let requested_model = model.as_deref().or(cfg.model.as_deref());
-        let inferred_deepseek_provider = model_provider.is_none()
-            && cfg.model_provider.is_none()
-            && requested_model.is_some_and(codex_models_manager::model_info::is_deepseek_slug);
-        let inferred_openrouter_provider = model_provider.is_none()
-            && cfg.model_provider.is_none()
-            && requested_model.is_some_and(|model| model.starts_with("openrouter/"));
-        let inferred_openpaths_provider = model_provider.is_none()
-            && cfg.model_provider.is_none()
-            && requested_model.is_some_and(|model| model.starts_with("openpaths/"));
-        let model_provider_id = config_layer_stack.required_model_provider().map(str::to_string)
+        // An explicit selection (override, config file, or managed requirement) always wins;
+        // otherwise the model slug picks the provider.
+        let model_provider_pinned = config_layer_stack.required_model_provider().is_some()
+            || model_provider.is_some()
+            || cfg.model_provider.is_some();
+        let model_provider_id = config_layer_stack
+            .required_model_provider()
+            .map(str::to_string)
             .or(model_provider)
             .or(cfg.model_provider)
             .unwrap_or_else(|| {
-                if inferred_deepseek_provider {
-                    DEEPSEEK_PROVIDER_ID.to_string()
-                } else if inferred_openrouter_provider {
-                    OPENROUTER_PROVIDER_ID.to_string()
-                } else if inferred_openpaths_provider {
-                    OPENPATHS_PROVIDER_ID.to_string()
-                } else {
-                    "openai".to_string()
-                }
+                model_provider_id_for_model(requested_model.unwrap_or_default()).to_string()
             });
         let model_provider = model_providers
             .get(&model_provider_id)
@@ -4274,6 +4296,7 @@ impl Config {
                 .unwrap_or_default(),
             model_provider_id,
             model_provider,
+            model_provider_pinned,
             cwd: resolved_cwd,
             workspace_roots: workspace_roots.clone(),
             workspace_roots_explicit,
