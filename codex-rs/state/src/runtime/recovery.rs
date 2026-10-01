@@ -185,7 +185,7 @@ fn sqlite_error_source_is_lock(source: &(dyn std::error::Error + 'static)) -> bo
             .is_some_and(sqlite_database_code_is_lock)
 }
 
-fn sqlite_database_code_is_lock(code: Cow<'_, str>) -> bool {
+fn sqlite_database_code_is_lock(code: std::borrow::Cow<'_, str>) -> bool {
     matches!(
         code.as_ref().to_ascii_lowercase().as_str(),
         "5" | "6" | "sqlite_busy" | "sqlite_locked"
@@ -223,7 +223,7 @@ fn sqlite_error_source_is_full(source: &(dyn std::error::Error + 'static)) -> bo
     }
 }
 
-fn sqlite_database_code_is_full(code: Cow<'_, str>) -> bool {
+fn sqlite_database_code_is_full(code: std::borrow::Cow<'_, str>) -> bool {
     matches!(
         code.as_ref().to_ascii_lowercase().as_str(),
         "13" | "sqlite_full"

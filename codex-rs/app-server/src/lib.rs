@@ -1383,7 +1383,7 @@ async fn init_sqlite_state_db_with_fresh_start_on_corruption(
         let mut attempted_backups = HashSet::new();
         loop {
             let err = match rollout_state_db::try_init(config).await {
-                Ok(state_db) => return Ok(state_db),
+                Ok(state_db) => return Ok(Some(state_db)),
                 Err(err) => err,
             };
             let database_path = codex_state::runtime_db_path_for_corruption_error(&err)
@@ -1391,6 +1391,14 @@ async fn init_sqlite_state_db_with_fresh_start_on_corruption(
             if !codex_state::is_sqlite_corruption_error(&err)
                 && !sqlite_home_is_blocking_file(database_path.as_path())
             {
+                if codex_state::is_sqlite_lock_error(&err) || codex_state::is_sqlite_full_error(&err) {
+                    emit_state_db_backup_warning(&format!(
+                        "Codex local database at {} is temporarily unavailable. Continuing without sqlite-backed local state for this process.",
+                        database_path.display()
+                    ));
+                    emit_state_db_backup_warning(&format!("SQLite startup error: {err:#}"));
+                    return Ok(None);
+                }
                 return Err(err);
             }
 
@@ -1453,7 +1461,7 @@ async fn init_sqlite_state_db_with_fresh_start_on_corruption(
         emit_state_db_backup_warning(&notice.details);
     }
     Ok(StateDbInitResult {
-        state_db: Some(state_db),
+        state_db,
         recovery_notice,
     })
 }
