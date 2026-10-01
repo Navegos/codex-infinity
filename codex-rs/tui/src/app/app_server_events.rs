@@ -1,4 +1,5 @@
 //! App-server event stream handling for the TUI app.
+//! Hidden structured threads reject requests instead of entering interactive routing.
 
 use super::App;
 use super::ThreadBufferedEvent;
@@ -325,7 +326,7 @@ impl App {
                 self.agents_overview.pending_usage = None;
                 self.agents_overview.usage_disabled = false;
                 self.repaint_agents_overview();
-                self.chat_widget.cyber_policy_notice = Default::default();
+                self.chat_widget.invalidate_security_setup();
                 if let Some(crate::pager_overlay::Overlay::Analytics(view)) = &mut self.overlay {
                     view.refresh();
                 }
@@ -360,10 +361,11 @@ impl App {
                     has_codex_backend_auth,
                 );
                 if self.chat_widget.has_chatgpt_account() {
-                    crate::daybreak::prefetch_notice(
+                    crate::security_setup::prefetch(
                         &self.config,
                         app_server_client,
-                        self.chat_widget.cyber_policy_notice.clone(),
+                        self.app_event_tx.clone(),
+                        self.chat_widget.security_setup_request_id,
                     );
                 }
                 return;
@@ -549,6 +551,23 @@ impl App {
         app_server_client: &AppServerSession,
         request: ServerRequest,
     ) {
+        let thread_id = server_request_thread_id(&request);
+        if thread_id
+            .is_some_and(|thread_id| self.temporary_structured_requests.contains_key(&thread_id))
+        {
+            if let Err(err) = self
+                .reject_app_server_request(
+                    app_server_client,
+                    request.id().clone(),
+                    "temporary structured threads cannot request tools or user interaction"
+                        .to_string(),
+                )
+                .await
+            {
+                tracing::debug!("{err}");
+            }
+            return;
+        }
         if let ServerRequest::DynamicToolCall { request_id, params } = &request {
             if self.dynamic_tool_tasks.contains_key(request_id)
                 || (params.namespace.as_deref() != Some(crate::dynamic_tools::NAMESPACE)
@@ -637,7 +656,6 @@ impl App {
             return;
         }
 
-        let thread_id = server_request_thread_id(&request);
         let background_voice = self.background_voice.as_ref().is_some_and(|owner| {
             owner.realtime_conversation_is_running()
                 && owner.thread_id().is_some()
@@ -681,6 +699,7 @@ impl App {
         }
         if let Some(thread_id) = thread_id
             && self.primary_thread_id != Some(thread_id)
+            && self.active_thread_id != Some(thread_id)
             && !unsupported_request
             && !background_voice
             && let Some(requests) = self.agents_overview.dispatched_requests.get_mut(&thread_id)

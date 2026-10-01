@@ -6,8 +6,8 @@ Reconnect failed — check the endpoint, then relaunch (0s)
 
 • Queued follow-up inputs
   ↳ x
-    shift+← edit last queued message
+    ⇧← edit last queued message
 
 › describe
 
-  ctrl+c quit
+  ⌃c quit

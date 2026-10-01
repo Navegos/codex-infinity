@@ -264,6 +264,11 @@ pub enum Feature {
     ///
     /// Requirements-only gate: this should be set from requirements, not user config.
     InAppBrowser,
+    /// Allow websites to open and customize annotation tools in desktop apps.
+    /// Ordinary user-driven annotation is independent of this gate.
+    ///
+    /// Requirements-only gate: this should be set from requirements, not user config.
+    BrowserAnnotationApi,
     /// Allow the in-app chat pane in desktop apps.
     ///
     /// Requirements-only gate: this should be set from requirements, not user config.
@@ -272,6 +277,11 @@ pub enum Feature {
     ///
     /// Requirements-only gate: this should be set from requirements, not user config.
     InAppDictation,
+    /// Allow in-app Voice in desktop apps.
+    ///
+    /// Requirements-only gate: this should be set from requirements, not user config.
+    /// Permission does not establish Voice availability or provider support.
+    InAppVoice,
     /// Allow desktop apps to run local automations.
     ///
     /// Requirements-only gate: this should be set from requirements, not user config.
@@ -1301,8 +1311,8 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::ApiKeyModelDiscovery,
         key: "api_key_model_discovery",
-        stage: Stage::UnderDevelopment,
-        default_enabled: false,
+        stage: Stage::Stable,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::ApiKeyCyberAccessPrograms,
@@ -1513,6 +1523,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: true,
     },
     FeatureSpec {
+        id: Feature::BrowserAnnotationApi,
+        key: "browser_annotation_api",
+        stage: Stage::Stable,
+        default_enabled: true,
+    },
+    FeatureSpec {
         id: Feature::InAppChat,
         key: "in_app_chat",
         stage: Stage::Stable,
@@ -1521,6 +1537,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::InAppDictation,
         key: "in_app_dictation",
+        stage: Stage::Stable,
+        default_enabled: true,
+    },
+    FeatureSpec {
+        id: Feature::InAppVoice,
+        key: "in_app_voice",
         stage: Stage::Stable,
         default_enabled: true,
     },
