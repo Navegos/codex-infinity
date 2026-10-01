@@ -3,6 +3,7 @@
 //! Owns the main app run loop from app-server bootstrap through terminal shutdown. Startup input
 //! remains isolated from protected interactive requests until the initialized composer owns it.
 //! Queued resume history replaces the provisional loading frame only when it is ready to render.
+//! Explicit local launch permissions remain runtime overrides across new sessions and reconnects.
 
 use super::reconnect::ReconnectState;
 use super::*;
@@ -17,6 +18,7 @@ fn spawn_startup_thread_start(
     app_server: &AppServerSession,
     local_settings: crate::local_settings::LocalSettings,
     config: Config,
+    launch_choices: crate::app_server_session::StartupLaunchChoices,
     app_event_tx: AppEventSender,
     worktree: Option<crate::ManagedTuiWorktree>,
 ) {
@@ -24,7 +26,6 @@ fn spawn_startup_thread_start(
     let thread_params_mode = app_server.thread_params_mode();
     let remote_cwd_override = app_server.remote_cwd_override().map(Path::to_path_buf);
     let thread_tool_transport = app_server.thread_tool_transport();
-    let model_provider_override = app_server.model_provider_override.clone();
     tokio::spawn(async move {
         let result = crate::app_server_session::start_thread_with_request_handle(
             request_handle,
@@ -33,7 +34,7 @@ fn spawn_startup_thread_start(
             thread_params_mode,
             remote_cwd_override,
             thread_tool_transport,
-            model_provider_override,
+            launch_choices,
         )
         .await
         .and_then(|started| {
@@ -121,6 +122,41 @@ pub(super) fn startup_model(
 }
 
 impl App {
+    /// Keep explicit local launch choices available for new sessions and reconnect recovery.
+    pub(super) fn remember_launch_permissions(&mut self) {
+        if self.app_server_target.thread_params_mode()
+            == crate::app_server_session::ThreadParamsMode::Remote
+        {
+            return;
+        }
+        let selected = crate::resume_permissions::ResumePermissions::from_overrides(
+            &self.config,
+            &self.harness_overrides,
+        );
+        if selected.approval_policy {
+            self.runtime_approval_policy_override = Some(RuntimeApprovalPolicyOverride::Explicit(
+                self.config.permissions.approval_policy.value().into(),
+            ));
+        }
+        if selected.approvals_reviewer {
+            self.runtime_approvals_reviewer_override = Some(self.config.approvals_reviewer);
+        }
+        if selected.profile {
+            let profile = RuntimePermissionProfileOverride::from_config(&self.config);
+            // The server owns constrained profiles that legacy turn parameters cannot express.
+            self.runtime_permission_profile_override =
+                (profile.active_permission_profile.is_some()
+                    || crate::app_server_session::turn_permissions_overrides(
+                        TurnPermissionsOverride::LegacySandbox(
+                            self.config.permissions.effective_permission_profile(),
+                        ),
+                        self.config.cwd.as_path(),
+                    )
+                    .is_ok())
+                .then_some(profile);
+        }
+    }
+
     /// Keep the provisional loading frame until queued history reaches the owned transcript.
     /// Visible startup decisions and the agent overview must still render immediately.
     pub(super) fn render_startup_frame(
@@ -298,6 +334,11 @@ impl App {
                 &harness_overrides,
             );
         }
+        let mut launch_choices = crate::app_server_session::StartupLaunchChoices::from_launch(
+            &cli_kv_overrides,
+            &harness_overrides,
+            &loader_overrides,
+        );
         let mut model = startup_model(&config, &bootstrap, startup_defaults.server_defaults_read);
         let available_models = bootstrap.available_models;
         let remote_connection = crate::status::remote_connection::remote_connection_status_value(
@@ -328,6 +369,7 @@ impl App {
                     tui,
                     &mut config,
                     &local_settings,
+                    &mut launch_choices,
                     model.as_str(),
                     &app_event_tx,
                     &available_models,
@@ -428,6 +470,7 @@ impl App {
                         &app_server,
                         local_settings.clone(),
                         config.clone(),
+                        launch_choices,
                         app_event_tx.clone(),
                         managed_worktree.clone(),
                     );
@@ -904,6 +947,7 @@ See the Codex keymap documentation for supported actions and examples."
             #[cfg(test)]
             _test_codex_home: None,
         };
+        app.remember_launch_permissions();
         if !tui.is_terminal_focused() {
             app.recap.note_focus_lost(Instant::now());
         }
@@ -1036,10 +1080,11 @@ See the Codex keymap documentation for supported actions and examples."
         // already has data and available reset credits can be surfaced, without
         // delaying the initial frame render.
         if requires_openai_auth && has_chatgpt_account {
-            crate::daybreak::prefetch_notice(
+            crate::security_setup::prefetch(
                 &app.config,
                 &app_server,
-                app.chat_widget.cyber_policy_notice.clone(),
+                app.app_event_tx.clone(),
+                app.chat_widget.security_setup_request_id,
             );
             let reset_hint_request_id = app.chat_widget.start_rate_limit_reset_startup_check();
             app.refresh_rate_limits(

@@ -41,7 +41,7 @@ npm install -g @codex-infinity/codex-infinity
 
 Then run `codex-infinity` to get started.
 
-By default, `codex-infinity` runs on `gpt-5.4`. Override it with `-m/--model`, `-c model=...`, or your `~/.codex/config.toml`.
+By default, `codex-infinity` runs on `gpt-6.1-sol`. Override it with `-m/--model`, `-c model=...`, or your `~/.codex/config.toml`.
 
 ### Authentication
 

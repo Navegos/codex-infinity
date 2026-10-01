@@ -279,6 +279,11 @@ pub(crate) struct AgentsOverviewThreadRefresh {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, IntoStaticStr)]
 pub(crate) enum AppEvent {
+    SecuritySetupLoaded {
+        request_id: uuid::Uuid,
+        identity: crate::security_setup::Identity,
+        notice: crate::security_setup::Notice,
+    },
     OpenDaemonMenu,
     ConfirmDaemonUpdate(crate::update_action::DaemonUpdateSource),
     RunDaemonUpdate(crate::update_action::DaemonUpdateSource),
@@ -1227,6 +1232,9 @@ pub(crate) enum AppEvent {
     OpenRealtimeDevicePicker {
         kind: codex_realtime_webrtc::AudioDeviceKind,
     },
+    OpenRealtimeInputChannels {
+        device: codex_realtime_webrtc::AudioDevice,
+    },
     RealtimeDevicesListed {
         origin: Option<ThreadId>,
         kind: codex_realtime_webrtc::AudioDeviceKind,
@@ -1235,6 +1243,9 @@ pub(crate) enum AppEvent {
     PersistRealtimeDevice {
         kind: codex_realtime_webrtc::AudioDeviceKind,
         name: Option<String>,
+    },
+    PersistRealtimeInputChannel {
+        channel: Option<codex_config::config_toml::MicrophoneChannels>,
     },
 
     /// Save the voice for subsequent conversations through the app server.
@@ -1245,6 +1256,12 @@ pub(crate) enum AppEvent {
     /// Persist the selected service tier to the appropriate config.
     PersistServiceTierSelection {
         service_tier: Option<String>,
+    },
+
+    /// Persist the current thread's Daybreak preference and the new-thread default.
+    PersistDaybreakSelection {
+        thread_id: ThreadId,
+        enabled: bool,
     },
 
     /// Fetch the current catalog even when cached models produce no picker.

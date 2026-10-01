@@ -18,6 +18,19 @@ pub const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
 const PERSONALITY_SECTION_HEADER: &str = "# Personality";
 
 pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig) -> ModelInfo {
+    // Preserve Infinity's concise base prompt after a backend catalog refresh.
+    // Tool, approval, and collaboration messages still come from that catalog.
+    if matches!(
+        model.slug.as_str(),
+        "gpt-6.1-sol" | "gpt-6-sol" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna"
+    ) && let Ok(catalog) = crate::bundled_models_response()
+        && let Some(bundled) = catalog.models.into_iter().find(|item| item.slug == model.slug)
+        && let Some(messages) = bundled.model_messages
+    {
+        let active = model.model_messages.get_or_insert_default();
+        active.instructions_template = messages.instructions_template;
+        active.instructions_variables = messages.instructions_variables;
+    }
     if let Some(context_window) = config.model_context_window {
         model.context_window = Some(
             model

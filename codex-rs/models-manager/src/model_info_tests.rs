@@ -26,6 +26,27 @@ fn config_with_personality(personality: Option<Personality>) -> ModelsManagerCon
 }
 
 #[test]
+fn sol_catalog_refresh_preserves_concise_prompt_and_other_messages() {
+    let mut model = model_info_from_slug("gpt-6.1-sol");
+    let expected = model.model_messages.clone();
+    model.model_messages.as_mut().unwrap().instructions_template =
+        Some("Backend verbose prompt".to_string());
+
+    let refreshed = with_config_overrides(model.clone(), &ModelsManagerConfig::default());
+    assert_eq!(refreshed.model_messages, expected);
+
+    let config = ModelsManagerConfig {
+        base_instructions: Some("User instructions".to_string()),
+        ..Default::default()
+    };
+    let overridden = with_config_overrides(model, &config);
+    let mut expected = expected.unwrap();
+    expected.instructions_template = config.base_instructions;
+    expected.instructions_variables = None;
+    assert_eq!(overridden.model_messages, Some(expected));
+}
+
+#[test]
 fn deepseek_v4_has_native_context_and_reasoning_metadata() {
     for slug in [
         "deepseek-v4-flash",

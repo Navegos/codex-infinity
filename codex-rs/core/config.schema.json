@@ -336,6 +336,14 @@
         }
       ]
     },
+    "AsyncClassifierMode": {
+      "description": "Async classifier experiment, resolved once for each parent task.",
+      "enum": [
+        "snapshot",
+        "conversation"
+      ],
+      "type": "string"
+    },
     "AuthCredentialsStoreMode": {
       "description": "Determine where Codex should store CLI auth credentials.",
       "oneOf": [
@@ -759,6 +767,9 @@
             "bedrock_setup_wizard": {
               "type": "boolean"
             },
+            "browser_annotation_api": {
+              "type": "boolean"
+            },
             "browser_use": {
               "type": "boolean"
             },
@@ -909,6 +920,9 @@
             "guardianv2": {
               "$ref": "#/definitions/FeatureToml_for_GuardianV2ConfigToml"
             },
+            "guardianv2_decisions_comparison": {
+              "type": "boolean"
+            },
             "hooks": {
               "type": "boolean"
             },
@@ -937,6 +951,9 @@
               "type": "boolean"
             },
             "in_app_updates": {
+              "type": "boolean"
+            },
+            "in_app_voice": {
               "type": "boolean"
             },
             "instant_interrupt": {
@@ -986,6 +1003,9 @@
             },
             "multi_agent_v2": {
               "$ref": "#/definitions/FeatureToml_for_MultiAgentV2ConfigToml"
+            },
+            "multi_agent_v2_dynamic_tools": {
+              "type": "boolean"
             },
             "network_proxy": {
               "$ref": "#/definitions/FeatureToml_for_NetworkProxyConfigToml"
@@ -1847,6 +1867,20 @@
       "additionalProperties": false,
       "description": "User-configurable prompt, approval, and context settings for Guardian v2.",
       "properties": {
+        "async_classifier_conversation_token_limit": {
+          "description": "Reset retained async history when the next request exceeds this token estimate. Defaults to 100,000. Fresh requests remain subject to the model's input limit.",
+          "format": "uint",
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "async_classifier_mode": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AsyncClassifierMode"
+            }
+          ],
+          "description": "Classifier experiment override. Otherwise use the model default, then snapshots."
+        },
         "classifier_instructions": {
           "type": "string"
         },
@@ -2557,6 +2591,24 @@
         "v2"
       ],
       "type": "string"
+    },
+    "MicrophoneChannels": {
+      "anyOf": [
+        {
+          "format": "uint16",
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        {
+          "items": {
+            "format": "uint16",
+            "minimum": 1.0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "Selected microphone inputs. Scalars preserve existing single-channel configuration."
     },
     "ModelAvailabilityNuxConfig": {
       "additionalProperties": {
@@ -3763,6 +3815,14 @@
       "properties": {
         "microphone": {
           "type": "string"
+        },
+        "microphone_channel": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/MicrophoneChannels"
+            }
+          ],
+          "description": "One-based microphone channels to mix; unset mixes all input channels."
         },
         "speaker": {
           "type": "string"
@@ -6695,6 +6755,10 @@
     "computer_use": {
       "$ref": "#/definitions/ComputerUseConfigToml"
     },
+    "daybreak": {
+      "description": "Default Daybreak preference for new threads and non-interactive turns.",
+      "type": "boolean"
+    },
     "default_permissions": {
       "description": "Default permissions profile to apply. Names starting with `:` refer to built-in profiles; other names are resolved from the `[permissions]` table.",
       "type": "string"
@@ -6807,6 +6871,9 @@
           "type": "boolean"
         },
         "bedrock_setup_wizard": {
+          "type": "boolean"
+        },
+        "browser_annotation_api": {
           "type": "boolean"
         },
         "browser_use": {
@@ -6959,6 +7026,9 @@
         "guardianv2": {
           "$ref": "#/definitions/FeatureToml_for_GuardianV2ConfigToml"
         },
+        "guardianv2_decisions_comparison": {
+          "type": "boolean"
+        },
         "hooks": {
           "type": "boolean"
         },
@@ -6987,6 +7057,9 @@
           "type": "boolean"
         },
         "in_app_updates": {
+          "type": "boolean"
+        },
+        "in_app_voice": {
           "type": "boolean"
         },
         "instant_interrupt": {
@@ -7036,6 +7109,9 @@
         },
         "multi_agent_v2": {
           "$ref": "#/definitions/FeatureToml_for_MultiAgentV2ConfigToml"
+        },
+        "multi_agent_v2_dynamic_tools": {
+          "type": "boolean"
         },
         "network_proxy": {
           "$ref": "#/definitions/FeatureToml_for_NetworkProxyConfigToml"

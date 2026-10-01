@@ -86,11 +86,10 @@ prompt for GPT-6.1 Sol and keeps the model's code-mode tool settings.
 Switches within one provider preserve its active endpoint and headers. Gateway
 model slugs select their provider unless a provider is explicitly pinned.
 
-A refreshed backend catalog supplies its own instructions. To keep the concise
-prompt after catalog refreshes, save the bundled model's `instructions_template`
-to a local file and set the top-level `model_instructions_file` to its absolute
-path. This overrides base instructions while preserving catalog tool and safety
-messages. Remove this setting to use the backend's base instructions again.
+Catalog refreshes preserve the bundled concise base prompt for GPT-6.1 Sol,
+GPT-6 Sol, and the GPT-5.6 Sol/Terra/Luna models while retaining refreshed tool,
+approval, and collaboration messages. A top-level `model_instructions_file`
+can override the base prompt with your own instructions.
 
 Build and deploy both `codex` and `codex-code-mode-host` from the same commit:
 

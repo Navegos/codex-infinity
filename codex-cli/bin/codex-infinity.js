@@ -81,7 +81,7 @@ if (targetTriples.length === 0) {
 const vendorRoot = path.join(__dirname, "..", "vendor");
 const binaryName = process.platform === "win32" ? "codex.exe" : "codex";
 const DEFAULT_MODEL_ENV_VAR = "CODEX_INFINITE_DEFAULT_MODEL";
-const DEFAULT_MODEL = "gpt-5.4";
+const DEFAULT_MODEL = "gpt-6.1-sol";
 
 // Find the first available binary
 let binaryPath = null;

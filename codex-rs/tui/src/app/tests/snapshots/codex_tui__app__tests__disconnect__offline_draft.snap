@@ -9,8 +9,8 @@ Reconnecting to server… (0s)
 
 • Queued follow-up inputs
   ↳ queued before disconnect
-    shift+← edit last queued message
+    ⇧← edit last queued message
 
 › keep this draft!
 
-  ctrl+c quit
+  ⌃c quit

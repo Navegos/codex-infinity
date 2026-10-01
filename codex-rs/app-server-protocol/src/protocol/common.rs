@@ -678,6 +678,11 @@ client_request_definitions! {
         serialization: None,
         response: v2::ThreadAttachmentListResponse,
     },
+    ThreadAttachmentOwnerList => "thread/attachmentOwner/list" {
+        params: v2::ThreadAttachmentOwnerListParams,
+        serialization: None,
+        response: v2::ThreadAttachmentOwnerListResponse,
+    },
     ThreadAttachmentRemove => "thread/attachment/remove" {
         params: v2::ThreadAttachmentRemoveParams,
         serialization: thread_id(params.thread_id),
@@ -1298,6 +1303,13 @@ client_request_definitions! {
         params: v2::BedrockSetupParams,
         serialization: global("account-auth"),
         response: v2::BedrockSetupResponse,
+    },
+
+    #[experimental("account/bedrock/checkGovCloudRequirements")]
+    BedrockCheckGovCloudRequirements => "account/bedrock/checkGovCloudRequirements" {
+        params: v2::BedrockCheckGovCloudRequirementsParams,
+        serialization: global("account-auth"),
+        response: v2::BedrockCheckGovCloudRequirementsResponse,
     },
 
     CancelLoginAccount => "account/login/cancel" {
@@ -2522,6 +2534,7 @@ mod tests {
         let thread_goal_set = ClientRequest::ThreadGoalSet {
             request_id: request_id(),
             params: v2::ThreadGoalSetParams {
+                origin: None,
                 thread_id: "goal-thread".to_string(),
                 objective: Some("ship it".to_string()),
                 status: None,
@@ -4440,6 +4453,7 @@ mod tests {
         let set_request = ClientRequest::ThreadGoalSet {
             request_id: RequestId::Integer(1),
             params: v2::ThreadGoalSetParams {
+                origin: None,
                 thread_id: "thr_123".to_string(),
                 objective: Some("ship goal mode".to_string()),
                 status: Some(v2::ThreadGoalStatus::Active),
@@ -4455,6 +4469,7 @@ mod tests {
         let clear_request = ClientRequest::ThreadGoalClear {
             request_id: RequestId::Integer(3),
             params: v2::ThreadGoalClearParams {
+                origin: None,
                 thread_id: "thr_123".to_string(),
             },
         };
