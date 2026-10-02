@@ -91,6 +91,16 @@ GPT-6 Sol, and the GPT-5.6 Sol/Terra/Luna models while retaining refreshed tool,
 approval, and collaboration messages. A top-level `model_instructions_file`
 can override the base prompt with your own instructions.
 
+Production releases use an Infinity version suffix, for example
+`0.159.3-infinity.1`, with the current upstream release version. The numeric
+version is sent to model discovery; retaining an old fork version can hide
+models that are available in the current upstream client.
+
+Keep the upstream `codex` executable and the fork `codex-infinity` executable
+separate. Install the fork as a complete release package and point shell
+shortcuts at its published package, rather than a stale build-tree binary.
+Sol low selects `gpt-6.1-sol` with `model_reasoning_effort = "low"`.
+
 Build and deploy both `codex` and `codex-code-mode-host` from the same commit:
 
 ```sh
