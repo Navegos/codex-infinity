@@ -241,6 +241,9 @@ async fn subagent_usage_draws_from_the_shared_budget() -> Result<()> {
                 .enable(Feature::MultiAgentV2)
                 .expect("test config should allow multi-agent v2");
             config.rollout_budget = Some(rollout_budget());
+            // Budget accounting is asserted from scripted replies; retries only add latency.
+            config.model_provider.request_max_retries = Some(0);
+            config.model_provider.stream_max_retries = Some(0);
         })
         .build(&server)
         .await?;

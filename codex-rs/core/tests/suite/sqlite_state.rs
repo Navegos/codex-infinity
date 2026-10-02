@@ -206,6 +206,9 @@ async fn new_thread_is_recorded_in_state_db() -> Result<()> {
             .features
             .enable(Feature::Sqlite)
             .expect("test config should allow feature update");
+        // This test asserts state-db bookkeeping, not transport behavior.
+        config.model_provider.request_max_retries = Some(0);
+        config.model_provider.stream_max_retries = Some(0);
     });
     let test = builder.build(&server).await?;
 

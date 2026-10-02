@@ -915,13 +915,18 @@ async fn compact_v2_rate_limit_message_without_retry_after_uses_server_advised_d
     Ok(())
 }
 
-/// Headerless remote compaction v2 overloads exhaust request retries before one terminal error.
+/// Headerless remote compaction v2 overloads wait out capacity pressure instead of ending the
+/// turn once the HTTP layer exhausts its request retries.
 #[tokio::test(flavor = "current_thread")]
-async fn compact_v2_overload_without_retry_after_exhausts_request_retries() -> Result<()> {
+async fn compact_v2_headerless_overload_waits_out_capacity_and_recovers() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let mut telemetry = RetryTelemetryCapture::install();
     let server = responses::start_mock_server().await;
+    let overload = || {
+        ResponseTemplate::new(503)
+            .set_body_json(json!({ "error": { "code": "server_is_overloaded" } }))
+    };
     let response_mock = responses::mount_response_sequence(
         &server,
         vec![
@@ -929,12 +934,19 @@ async fn compact_v2_overload_without_retry_after_exhausts_request_retries() -> R
                 responses::ev_response_created("seed"),
                 responses::ev_completed("seed"),
             ])),
-            ResponseTemplate::new(503)
-                .set_body_json(json!({ "error": { "code": "server_is_overloaded" } })),
-            ResponseTemplate::new(503)
-                .set_body_json(json!({ "error": { "code": "server_is_overloaded" } })),
-            ResponseTemplate::new(503)
-                .set_body_json(json!({ "error": { "code": "server_is_overloaded" } })),
+            overload(),
+            overload(),
+            overload(),
+            responses::sse_response(responses::sse(vec![
+                json!({
+                    "type": "response.output_item.done",
+                    "item": {
+                        "type": "compaction",
+                        "encrypted_content": "RETRIED_COMPACTION_SUMMARY",
+                    }
+                }),
+                responses::ev_completed("compacted"),
+            ])),
         ],
     )
     .await;
@@ -942,7 +954,8 @@ async fn compact_v2_overload_without_retry_after_exhausts_request_retries() -> R
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             config.model_provider.request_max_retries = Some(2);
-            config.model_provider.stream_max_retries = Some(2);
+            // Capacity waits ignore the stream budget; other failures still honor it.
+            config.model_provider.stream_max_retries = Some(0);
         })
         .build_with_auto_env(&server)
         .await?;
@@ -973,41 +986,38 @@ async fn compact_v2_overload_without_retry_after_exhausts_request_retries() -> R
         }
     );
     wait_for_retry(&mut telemetry, &second_retry).await;
+
     let mut error_events = 0;
-    let mut stream_error_events = 0;
+    let mut capacity_waits = 0;
     loop {
         match wait_for_event(&test.codex, |_| true).await {
-            EventMsg::Error(error) => {
-                error_events += 1;
-                assert_eq!(
-                    error.codex_error_info,
-                    Some(CodexErrorInfo::ServerOverloaded)
-                );
+            EventMsg::Error(_) => error_events += 1,
+            EventMsg::StreamError(event) => {
                 assert!(
-                    error
-                        .message
-                        .contains("Selected model is at capacity. Please try a different model.")
+                    event.message.contains("Model at capacity, retrying in"),
+                    "unexpected stream error: {}",
+                    event.message
                 );
+                capacity_waits += 1;
             }
-            EventMsg::StreamError(_) => stream_error_events += 1,
-            EventMsg::TurnComplete(event) => {
-                assert_eq!(
-                    event.error.and_then(|error| error.codex_error_info),
-                    Some(CodexErrorInfo::ServerOverloaded)
-                );
-                break;
-            }
+            EventMsg::TurnComplete(_) => break,
             _ => {}
         }
     }
 
-    assert_eq!(error_events, 1);
-    assert_eq!(stream_error_events, 0);
+    assert_eq!(
+        error_events, 0,
+        "capacity pressure should not fail the turn"
+    );
+    assert_eq!(
+        capacity_waits, 1,
+        "expected one capacity wait before recovery"
+    );
     let requests = response_mock.requests();
     assert_eq!(
         requests.len(),
-        4,
-        "expected a seed request and three remote compaction v2 attempts"
+        5,
+        "expected a seed request, three overloaded compaction attempts, and one retry"
     );
     for request in &requests[1..] {
         assert_eq!(request.path(), "/v1/responses");

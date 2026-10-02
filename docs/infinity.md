@@ -115,4 +115,5 @@ Updating the installed binaries takes effect for newly started sessions.
 Empty background polls default to 30 seconds to reduce model turns. Explicit
 short waits remain available, with a five-second minimum; stdin writes default
 to 250 milliseconds. Setting a provider's `stream_max_retries = 0` disables
-automatic sampling retries, including waits for usage resets and overloads.
+automatic sampling retries and waits for usage resets. Model capacity
+overloads are still waited out, so a long capacity outage never ends a turn.

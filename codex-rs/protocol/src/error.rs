@@ -413,9 +413,13 @@ impl CodexErr {
             | CodexErrorDetails::CyberPolicy { .. }
             | CodexErrorDetails::BioPolicy { .. }
             | CodexErrorDetails::MisalignmentPolicyViolation { .. } => None,
-            CodexErrorDetails::ServerOverloaded | CodexErrorDetails::RetryLimit(_) => {
+            // Capacity pressure is retryable on its own, so without server advice callers
+            // still get a local backoff instead of treating the turn as terminal.
+            CodexErrorDetails::ServerOverloaded => Some(
                 self.server_retry_delay()
-            }
+                    .unwrap_or_else(|| backoff(retry_count)),
+            ),
+            CodexErrorDetails::RetryLimit(_) => self.server_retry_delay(),
             CodexErrorDetails::Stream(..)
             | CodexErrorDetails::ContentFilter
             | CodexErrorDetails::RateLimitExceeded(_)

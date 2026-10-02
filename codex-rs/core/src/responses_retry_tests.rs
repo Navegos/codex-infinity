@@ -124,13 +124,11 @@ fn server_overload_retry_starts_with_five_second_delay() {
 async fn server_overload_wait_rejects_non_overload_errors() {
     let (session, turn_context) = make_session_and_context().await;
     let mut state = ResponsesStreamRetryState::default();
-    let cancellation = tokio_util::sync::CancellationToken::new();
     let result = super::wait_for_server_overload_retry(
         &mut state,
         &session,
         &turn_context,
         CodexErr::InternalServerError,
-        &cancellation,
     )
     .await;
     assert!(matches!(
@@ -141,35 +139,56 @@ async fn server_overload_wait_rejects_non_overload_errors() {
     assert_eq!(state.server_overload_retry_delay, Duration::from_secs(5));
 }
 
+/// Capacity waits grow without a bound and honor a server-advised deadline when present.
 #[tokio::test]
-async fn server_overload_wait_can_be_cancelled_and_backs_off_exponentially() {
+async fn server_overload_wait_backs_off_exponentially_and_honors_server_advice() {
     let (session, turn_context) = make_session_and_context().await;
-    let cancellation = tokio_util::sync::CancellationToken::new();
-    cancellation.cancel();
     let mut state = ResponsesStreamRetryState::default();
-    for (attempt, delay_secs) in [(1, 5), (2, 10), (3, 20)] {
-        let result = tokio::time::timeout(
-            Duration::from_secs(1),
-            super::wait_for_server_overload_retry(
+    tokio::time::pause();
+
+    for (attempt, delay_secs) in [(1, 5), (2, 10), (3, 20), (4, 40), (5, 80), (6, 160)] {
+        {
+            let wait = super::wait_for_server_overload_retry(
                 &mut state,
                 &session,
                 &turn_context,
                 CodexErr::ServerOverloaded,
-                &cancellation,
-            ),
-        )
-        .await
-        .expect("cancelled wait should finish immediately");
-        assert!(matches!(
-            result.unwrap_err().details(),
-            codex_protocol::error::CodexErrorDetails::TurnAborted
-        ));
+            );
+            tokio::pin!(wait);
+            assert!(futures::poll!(&mut wait).is_pending());
+            tokio::time::advance(Duration::from_secs(delay_secs)).await;
+            wait.await.expect("capacity wait should allow a retry");
+        }
         assert_eq!(state.server_overload_attempts, attempt);
         assert_eq!(
             state.server_overload_retry_delay,
-            Duration::from_secs(delay_secs * 2)
+            Duration::from_secs(delay_secs * 2).min(super::MAX_SERVER_OVERLOAD_RETRY_DELAY)
         );
     }
+    assert_eq!(
+        state.server_overload_retry_delay,
+        super::MAX_SERVER_OVERLOAD_RETRY_DELAY
+    );
+
+    let advice = RetryAfter::from_delay(Duration::from_secs(30)).expect("retry deadline");
+    super::wait_for_server_overload_retry(
+        &mut state,
+        &session,
+        &turn_context,
+        CodexErr::ServerOverloaded.with_retry_after(advice),
+    )
+    .await
+    .expect("advised capacity wait should allow a retry");
+    let resumed_at = Instant::now();
+    assert!(
+        (advice.deadline()..=advice.deadline() + Duration::from_millis(1)).contains(&resumed_at),
+        "advised capacity wait resumed at {resumed_at:?}, expected {advice:?}"
+    );
+    // Server advice owns the pacing while the local backoff stays pinned at its cap.
+    assert_eq!(
+        state.server_overload_retry_delay,
+        super::MAX_SERVER_OVERLOAD_RETRY_DELAY
+    );
 }
 
 #[tokio::test]

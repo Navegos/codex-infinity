@@ -25,6 +25,7 @@ use crate::responses_metadata::CompactionTurnMetadata;
 use crate::responses_retry::ResponsesStreamRequest;
 use crate::responses_retry::ResponsesStreamRetryState;
 use crate::responses_retry::handle_response_stream_error;
+use crate::responses_retry::wait_for_server_overload_retry;
 use crate::session::RequestEffortUsage;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
@@ -76,7 +77,7 @@ pub(crate) const RETAINED_MESSAGE_TOKEN_BUDGET: usize = 64_000;
 const MAX_RETAINED_AGENT_MESSAGE_TOKENS: i64 = 10_000;
 // Compact attempts can run much longer than normal turns, so keep the per-transport
 // retry budget smaller than the general Responses stream retry budget.
-const MAX_REMOTE_COMPACTION_V2_STREAM_RETRIES: u64 = 2;
+const MAX_REMOTE_COMPACTION_V2_STREAM_RETRIES: u64 = 8;
 
 pub(crate) async fn run_inline_remote_auto_compact_task(
     sess: Arc<Session>,
@@ -241,6 +242,9 @@ async fn run_remote_compact_task_inner_impl(
     sess.emit_turn_item_started(turn_context, &compaction_item)
         .await;
 
+    // When a fallback model is available, capacity spends the bounded retry budget so the
+    // fallback below can switch models; otherwise the request waits the capacity out.
+    let can_fallback_to_current_model = fallback_step_context.is_some();
     let attempt = run_remote_compact_v2_attempt(
         sess,
         step_context,
@@ -248,6 +252,7 @@ async fn run_remote_compact_task_inner_impl(
         &compaction_trace,
         compaction_metadata,
         analytics_details,
+        can_fallback_to_current_model,
     )
     .await;
     let (attempt, compaction_turn_context) = match attempt {
@@ -276,6 +281,7 @@ async fn run_remote_compact_task_inner_impl(
                 &fallback_compaction_trace,
                 compaction_metadata,
                 analytics_details,
+                /*can_fallback_to_current_model*/ false,
             )
             .await;
             record_model_fallback(
@@ -391,6 +397,7 @@ async fn run_remote_compaction_request_v2(
     client_session: &mut ModelClientSession,
     prompt: &Prompt,
     responses_metadata: &CodexResponsesMetadata,
+    can_fallback_to_current_model: bool,
 ) -> CodexResult<RemoteCompactionV2Output> {
     let turn_context = &step_context.turn;
     let max_retries = turn_context
@@ -424,6 +431,15 @@ async fn run_remote_compaction_request_v2(
         match result {
             Ok(compaction_output) => return Ok(compaction_output),
             Err(err) => {
+                // A long capacity outage must not cost the turn its history, but a previous-model
+                // attempt keeps its retry budget so the caller can fall back to another model.
+                if !can_fallback_to_current_model
+                    && matches!(err.details(), CodexErrorDetails::ServerOverloaded)
+                {
+                    wait_for_server_overload_retry(&mut retry_state, sess, turn_context, err)
+                        .await?;
+                    continue;
+                }
                 handle_response_stream_error(
                     &mut retry_state,
                     max_retries,

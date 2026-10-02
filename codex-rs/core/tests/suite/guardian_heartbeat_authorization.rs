@@ -199,6 +199,9 @@ async fn heartbeat_root_projection_uses_latest_turn_skills(
             for feature in [Feature::Collab, Feature::MultiAgentV2, feature] {
                 config.features.enable(feature).expect("enable feature");
             }
+            // Heartbeat turns are fully scripted; retries would only add latency.
+            config.model_provider.request_max_retries = Some(0);
+            config.model_provider.stream_max_retries = Some(0);
         })
         .build_with_auto_env(&server)
         .await?;

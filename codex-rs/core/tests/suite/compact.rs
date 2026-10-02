@@ -3214,11 +3214,11 @@ async fn manual_remote_compact_advice_respects_retry_limit(max_retries: u64) {
     skip_if_no_network!();
 
     let server = start_mock_server().await;
-    let overload = wiremock::ResponseTemplate::new(/*s*/ 503)
+    let server_error = wiremock::ResponseTemplate::new(/*s*/ 500)
         .insert_header("Retry-After", "0")
-        .set_body_json(json!({ "error": { "code": "server_is_overloaded" } }));
+        .set_body_json(json!({ "error": { "code": "internal_error" } }));
     let request_log =
-        mount_response_sequence(&server, vec![overload; (max_retries + 1) as usize]).await;
+        mount_response_sequence(&server, vec![server_error; (max_retries + 1) as usize]).await;
     let mut model_provider = openai_model_provider(&server);
     model_provider.request_max_retries = Some(0);
     model_provider.stream_max_retries = Some(max_retries);
@@ -3243,14 +3243,14 @@ async fn manual_remote_compact_advice_respects_retry_limit(max_retries: u64) {
             EventMsg::TurnComplete(event) => {
                 assert_eq!(
                     event.error.and_then(|error| error.codex_error_info),
-                    Some(CodexErrorInfo::ServerOverloaded)
+                    Some(CodexErrorInfo::InternalServerError)
                 );
                 break;
             }
             _ => {}
         }
     }
-    assert_eq!(errors, vec![Some(CodexErrorInfo::ServerOverloaded)]);
+    assert_eq!(errors, vec![Some(CodexErrorInfo::InternalServerError)]);
     assert_eq!(
         reconnect_messages,
         (1..=max_retries)
@@ -3268,6 +3268,65 @@ async fn manual_remote_compact_advice_respects_retry_limit(max_retries: u64) {
         })
         .collect::<Vec<_>>();
     assert_eq!(models, vec!["gpt-5.4"; (max_retries + 1) as usize]);
+}
+
+/// Manual compaction waits out capacity pressure instead of failing once its retry budget is
+/// spent, because there is no other model for the caller to fall back to.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manual_remote_compact_waits_out_capacity_past_retry_limit() {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+    let overload = wiremock::ResponseTemplate::new(/*s*/ 503)
+        .insert_header("Retry-After", "0")
+        .set_body_json(json!({ "error": { "code": "server_is_overloaded" } }));
+    let request_log = mount_response_sequence(
+        &server,
+        vec![
+            overload.clone(),
+            overload,
+            sse_response(remote_v2_compaction_response()),
+        ],
+    )
+    .await;
+    let mut model_provider = openai_model_provider(&server);
+    model_provider.request_max_retries = Some(0);
+    model_provider.stream_max_retries = Some(0);
+    let test = test_codex()
+        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_model("gpt-5.4")
+        .with_config(move |config| {
+            config.model_provider = model_provider;
+            set_test_compact_prompt(config);
+        })
+        .build_with_auto_env(&server)
+        .await
+        .expect("build codex");
+
+    test.codex.submit(Op::Compact).await.expect("run /compact");
+    let mut capacity_waits = Vec::new();
+    loop {
+        match wait_for_event(&test.codex, |_| true).await {
+            EventMsg::Error(error) => panic!(
+                "capacity pressure should not fail compaction: {:?}",
+                error.codex_error_info
+            ),
+            EventMsg::StreamError(error) => capacity_waits.push(error.message),
+            EventMsg::TurnComplete(event) => {
+                assert_eq!(event.error, None, "compaction should recover");
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        capacity_waits,
+        vec![
+            "Model at capacity, retrying in 0s (attempt 1)",
+            "Model at capacity, retrying in 0s (attempt 2)",
+        ]
+    );
+    assert_eq!(request_log.requests().len(), 3);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -4241,6 +4300,57 @@ async fn manual_compact_non_context_failure_retries_then_emits_task_error() {
         "expected local compact task error prefix, got {task_error_message}"
     );
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+}
+
+/// A terminal compact failure must surface immediately instead of spending the stream retry
+/// budget on requests that can never succeed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manual_compact_terminal_failure_does_not_consume_retry_budget() {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+
+    let user_turn = sse(vec![
+        ev_assistant_message("m1", FIRST_REPLY),
+        ev_completed("r1"),
+    ]);
+    let rejected = invalid_request_response("compact request was rejected");
+
+    let requests = mount_response_sequence(&server, vec![sse_response(user_turn), rejected]).await;
+
+    let mut model_provider = non_openai_model_provider(&server);
+    model_provider.stream_max_retries = Some(5);
+
+    let codex = test_codex()
+        .with_config(move |config| {
+            config.model_provider = model_provider;
+            set_test_compact_prompt(config);
+            config.model_auto_compact_token_limit = Some(200_000);
+        })
+        .build(&server)
+        .await
+        .expect("build codex")
+        .codex;
+
+    codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "first turn".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await
+        .unwrap();
+    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+
+    codex.submit(Op::Compact).await.expect("trigger compact");
+    wait_for_event(&codex, |ev| matches!(ev, EventMsg::Error(_))).await;
+    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+
+    // Only the user turn and the single rejected compact attempt; no retries.
+    assert_eq!(
+        requests.requests().len(),
+        2,
+        "a terminal compact failure should not be retried"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

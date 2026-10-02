@@ -95,6 +95,9 @@ async fn sampling_requires_gateway_and_primary_auth(expected_error: Option<&str>
         .with_auth(CodexAuth::from_api_key("primary-token"))
         .with_config(move |config| {
             config.model_provider = provider;
+            // The gateway token failure is what this test observes; retries only add latency.
+            config.model_provider.request_max_retries = Some(0);
+            config.model_provider.stream_max_retries = Some(0);
         })
         .build_with_auto_env(&server)
         .await?;

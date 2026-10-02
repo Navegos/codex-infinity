@@ -4171,6 +4171,9 @@ async fn approving_fallback_rule_for_compound_command_works() -> Result<()> {
         config
             .set_legacy_sandbox_policy(sandbox_policy_for_config)
             .expect("set sandbox policy");
+        // Keep the approval flow deterministic; retries only add latency here.
+        config.model_provider.request_max_retries = Some(0);
+        config.model_provider.stream_max_retries = Some(0);
     });
     let test = builder.build(&server).await?;
 

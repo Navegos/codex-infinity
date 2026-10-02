@@ -16,6 +16,8 @@ use crate::hook_runtime::run_post_compact_hooks;
 use crate::hook_runtime::run_pre_compact_hooks;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CompactionTurnMetadata;
+use crate::responses_retry::ResponsesStreamRetryState;
+use crate::responses_retry::wait_for_server_overload_retry;
 use crate::session::RequestEffortUsage;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
@@ -267,7 +269,8 @@ async fn run_compact_task_inner_impl(
     );
 
     let max_retries = turn_context.provider.info().stream_max_retries();
-    let mut retries = 0;
+    let mut retries: u64 = 0;
+    let mut retry_state = ResponsesStreamRetryState::default();
     // Reuse one client session so turn-scoped state (sticky routing and websocket incremental
     // request tracking) survives retries within this compact turn.
     let mut client_session = sess.services.model_client.new_session();
@@ -327,9 +330,25 @@ async fn run_compact_task_inner_impl(
                 sess.set_total_tokens_full(turn_context.as_ref()).await;
                 return Err(e);
             }
+            // Capacity pressure is waited out instead of spending the bounded retry budget, so
+            // a long outage cannot cost the turn its history.
+            Err(e) if matches!(e.details(), CodexErrorDetails::ServerOverloaded) => {
+                wait_for_server_overload_retry(
+                    &mut retry_state,
+                    sess.as_ref(),
+                    turn_context.as_ref(),
+                    e,
+                )
+                .await?;
+                continue;
+            }
             Err(e) => {
+                // Terminal errors (invalid requests, policy refusals) must not spend the retry
+                // budget; only retry what `retry_delay` classifies as retryable.
+                if e.retry_delay(retries.saturating_add(1)).is_none() {
+                    return Err(e);
+                }
                 if retries < max_retries {
-                    retries += 1;
                     let delay = backoff(retries);
                     sess.notify_stream_error(
                         turn_context.as_ref(),

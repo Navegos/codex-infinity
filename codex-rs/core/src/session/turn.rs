@@ -1732,18 +1732,16 @@ async fn run_sampling_request(
                     .await?;
                     continue;
                 }
+                // Capacity pressure never ends a sampling turn, whatever the retry budget says.
                 CodexErrorDetails::ServerOverloaded => {
-                    if max_retries == 0 {
-                        return Err(err);
-                    }
                     wait_for_server_overload_retry(
                         &mut retry_state,
                         sess.as_ref(),
                         turn_context.as_ref(),
                         err,
-                        &cancellation_token,
                     )
-                    .await?;
+                    .or_cancel(&cancellation_token)
+                    .await??;
                     continue;
                 }
                 _ => err,

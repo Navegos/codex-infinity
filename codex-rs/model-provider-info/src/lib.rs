@@ -61,15 +61,15 @@ pub fn read_managed_residency_requirement() -> Option<ResidencyRequirement> {
 }
 
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS: u64 = 300_000;
-const DEFAULT_STREAM_MAX_RETRIES: u64 = 5;
-const DEFAULT_REQUEST_MAX_RETRIES: u64 = 4;
+const DEFAULT_STREAM_MAX_RETRIES: u64 = 20;
+const DEFAULT_REQUEST_MAX_RETRIES: u64 = 16;
 const DEFAULT_AWS_CREDENTIAL_EXPORT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_AWS_AUTH_REFRESH_TIMEOUT_MS: u64 = 300_000;
 pub const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS: u64 = 15_000;
 /// Hard cap for user-configured `stream_max_retries`.
-const MAX_STREAM_MAX_RETRIES: u64 = 100;
+const MAX_STREAM_MAX_RETRIES: u64 = 400;
 /// Hard cap for user-configured `request_max_retries`.
-const MAX_REQUEST_MAX_RETRIES: u64 = 100;
+const MAX_REQUEST_MAX_RETRIES: u64 = 400;
 
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 const OPENAI_ACTOR_AUTHORIZATION_HEADER: &str = "x-openai-actor-authorization";

@@ -225,6 +225,9 @@ async fn process_sse_emits_failed_event_on_parse_error() {
                 .features
                 .disable(Feature::GhostCommit)
                 .expect("test config should allow feature update");
+            // The stream failure is what this test observes; retries would only add latency.
+            config.model_provider.request_max_retries = Some(0);
+            config.model_provider.stream_max_retries = Some(0);
         })
         .build(&server)
         .await
@@ -266,6 +269,9 @@ async fn process_sse_records_failed_event_when_stream_closes_without_completed()
                 .features
                 .disable(Feature::GhostCommit)
                 .expect("test config should allow feature update");
+            // The truncated stream is what this test observes; retries would only add latency.
+            config.model_provider.request_max_retries = Some(0);
+            config.model_provider.stream_max_retries = Some(0);
         })
         .build(&server)
         .await
@@ -432,6 +438,9 @@ async fn process_sse_failed_event_logs_missing_error() {
                 .features
                 .disable(Feature::GhostCommit)
                 .expect("test config should allow feature update");
+            // The missing failure detail is what this test observes; retries only add latency.
+            config.model_provider.request_max_retries = Some(0);
+            config.model_provider.stream_max_retries = Some(0);
         })
         .build(&server)
         .await

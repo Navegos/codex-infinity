@@ -1,6 +1,8 @@
 //! Shared retry and transport fallback decisions for Responses requests.
 //! Content-filter guidance is recorded for sampling requests before retry decisions.
-//! Server advice controls timing without extending configured retry limits.
+//! Server advice controls timing without extending configured retry limits. Model capacity
+//! pressure is the exception: callers that can wait out an outage call
+//! [`wait_for_server_overload_retry`] directly instead of spending the retry budget.
 
 use std::time::Duration;
 
@@ -28,9 +30,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 const INITIAL_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(5);
-const MAX_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(60);
+const MAX_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(240);
 const INITIAL_SERVER_OVERLOAD_RETRY_DELAY: Duration = Duration::from_secs(5);
-const MAX_SERVER_OVERLOAD_RETRY_DELAY: Duration = Duration::from_secs(60);
+const MAX_SERVER_OVERLOAD_RETRY_DELAY: Duration = Duration::from_secs(240);
 
 /// Small cushion after the advertised reset time so retries do not race the window boundary.
 const USAGE_LIMIT_RESET_BUFFER: Duration = Duration::from_secs(2);
@@ -221,23 +223,29 @@ fn log_retry(
     }
 }
 
-/// Waits with exponential backoff when the selected model reports capacity
-/// pressure, returning `Ok(())` when the caller should retry the request loop.
-/// Unlike bounded stream retries this waits indefinitely so agents recover
-/// without a manual restart; the wait is cancellable.
+/// Waits when the selected model reports capacity pressure, returning `Ok(())` when the caller
+/// should retry the request loop. Unlike bounded stream retries this waits indefinitely so long
+/// capacity outages do not end a turn; the caller owns cancellation by dropping this future.
+/// Server advice sets the deadline when present, otherwise the wait grows exponentially.
 pub(crate) async fn wait_for_server_overload_retry(
     retry_state: &mut ResponsesStreamRetryState,
     sess: &Session,
     turn_context: &TurnContext,
     err: CodexErr,
-    cancellation_token: &CancellationToken,
 ) -> Result<(), CodexErr> {
     if !matches!(err.details(), CodexErrorDetails::ServerOverloaded) {
         return Err(err);
     }
     retry_state.server_overload_attempts = retry_state.server_overload_attempts.saturating_add(1);
     let attempt = retry_state.server_overload_attempts;
-    let delay = retry_state.server_overload_retry_delay;
+    let backoff_delay = retry_state.server_overload_retry_delay;
+    // Use one clock sample so the notification and the sleep agree on the remaining delay.
+    let now = Instant::now();
+    let retry_at = err
+        .retry_after()
+        .map(RetryAfter::deadline)
+        .unwrap_or(now + backoff_delay);
+    let delay = retry_at.saturating_duration_since(now);
     warn!(
         turn_id = %turn_context.sub_id,
         attempt,
@@ -254,15 +262,11 @@ pub(crate) async fn wait_for_server_overload_retry(
         err,
     )
     .await;
-    retry_state.server_overload_retry_delay =
-        delay.saturating_mul(2).min(MAX_SERVER_OVERLOAD_RETRY_DELAY);
-    match tokio::time::sleep(delay)
-        .or_cancel(cancellation_token)
-        .await
-    {
-        Ok(()) => Ok(()),
-        Err(CancelErr::Cancelled) => Err(CodexErr::TurnAborted),
-    }
+    retry_state.server_overload_retry_delay = backoff_delay
+        .saturating_mul(2)
+        .min(MAX_SERVER_OVERLOAD_RETRY_DELAY);
+    tokio::time::sleep_until(retry_at).await;
+    Ok(())
 }
 
 /// Waits until a usage-limit window resets and returns `Ok(())` when the caller should retry the

@@ -38,6 +38,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
     compaction_trace: &CompactionTraceContext,
     compaction_metadata: CompactionTurnMetadata,
     analytics_details: &mut CompactionAnalyticsDetails,
+    can_fallback_to_current_model: bool,
 ) -> CodexResult<RemoteCompactV2Attempt> {
     let turn_context = &step_context.turn;
     let mut history = sess.clone_history().await;
@@ -112,6 +113,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
         client_session,
         &prompt,
         &responses_metadata,
+        can_fallback_to_current_model,
     )
     .await;
     trace_attempt.record_result(

@@ -39,7 +39,7 @@ async fn codex_err_debug_preserves_legacy_shape() {
 #[test]
 fn retryability_preserves_error_details_distinctions() {
     let errors = [
-        (CodexErr::ServerOverloaded, false),
+        (CodexErr::ServerOverloaded, true),
         (CodexErr::new(CodexErrorDetails::ContentFilter), true),
         (
             CodexErr::new(CodexErrorDetails::RateLimitExceeded("retry later".into())),
@@ -215,6 +215,26 @@ fn server_overloaded_maps_to_protocol() {
     assert_eq!(
         err.to_codex_protocol_error(),
         CodexErrorInfo::ServerOverloaded
+    );
+}
+
+#[test]
+fn server_overloaded_retries_without_server_advice() {
+    let err = CodexErr::ServerOverloaded;
+    // Capacity errors carry no advice, so callers still get a local backoff instead of `None`.
+    let first = err
+        .retry_delay(/*retry_count*/ 1)
+        .expect("capacity is retryable");
+    assert!(
+        (Duration::from_millis(180)..=Duration::from_millis(220)).contains(&first),
+        "unexpected first retry delay: {first:?}"
+    );
+    let fourth = err
+        .retry_delay(/*retry_count*/ 4)
+        .expect("capacity is retryable");
+    assert!(
+        (Duration::from_millis(1440)..=Duration::from_millis(1760)).contains(&fourth),
+        "unexpected fourth retry delay: {fourth:?}"
     );
 }
 
