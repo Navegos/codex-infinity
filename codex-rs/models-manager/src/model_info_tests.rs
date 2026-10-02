@@ -27,7 +27,12 @@ fn config_with_personality(personality: Option<Personality>) -> ModelsManagerCon
 
 #[test]
 fn sol_catalog_refresh_preserves_concise_prompt_and_other_messages() {
-    let mut model = model_info_from_slug("gpt-6.1-sol");
+    let mut model = crate::bundled_models_response()
+        .unwrap()
+        .models
+        .into_iter()
+        .find(|model| model.slug == "gpt-6.1-sol")
+        .unwrap();
     let expected = model.model_messages.clone();
     model.model_messages.as_mut().unwrap().instructions_template =
         Some("Backend verbose prompt".to_string());

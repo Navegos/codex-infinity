@@ -42,9 +42,9 @@ async fn api_key_discovery_flag_controls_fetches_and_cached_catalogs() {
     let auth = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("test-key"));
     let manager =
         OpenAiModelsManager::new(home.path().into(), endpoint.clone(), Some(auth.clone()));
-    // No refresh happens here, so the catalog is the seeded default, which carries the
-    // fork's gateway models. Once the backend answers it owns the catalog and they drop out.
-    let bundled = with_gateway_models(load_remote_models_from_file().unwrap());
+    // Disabling API-key discovery selects the bundled fallback even when a seeded
+    // or cached catalog contains additional provider models.
+    let bundled = load_remote_models_from_file().unwrap();
 
     for strategy in [
         RefreshStrategy::Online,
