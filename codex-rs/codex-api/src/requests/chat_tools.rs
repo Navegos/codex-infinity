@@ -30,6 +30,7 @@ pub(crate) fn restore_tool_call(
             ApiError::Stream("invalid custom tool input from Chat Completions".into())
         })?;
         Ok(ResponseItem::CustomToolCall {
+            encrypted_content: None,
             id: None,
             status: None,
             name,
@@ -40,6 +41,8 @@ pub(crate) fn restore_tool_call(
         })
     } else {
         Ok(ResponseItem::FunctionCall {
+            encrypted_content: None,
+            status: None,
             id: None,
             name,
             namespace,

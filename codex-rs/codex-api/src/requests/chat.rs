@@ -102,7 +102,7 @@ impl<'a> ChatRequestBuilder<'a> {
                     for part in content {
                         match part {
                             ContentItem::InputText { text: value }
-                            | ContentItem::OutputText { text: value } => {
+                            | ContentItem::OutputText { text: value, .. } => {
                                 text.push_str(value);
                                 parts.push(json!({"type": "text", "text": value}));
                             }

@@ -242,7 +242,7 @@ async fn run_remote_compact_task_inner_impl(
 
     // When a fallback model is available, capacity spends the bounded retry budget so the
     // fallback below can switch models; otherwise the request waits the capacity out.
-    let can_fallback_to_current_model = fallback_step_context.is_some();
+    let can_fallback_to_current_model = !Arc::ptr_eq(step_context, replacement_step_context);
     let attempt = run_remote_compact_v2_attempt(
         sess,
         step_context,

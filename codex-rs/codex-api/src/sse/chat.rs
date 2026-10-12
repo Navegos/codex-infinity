@@ -113,6 +113,8 @@ pub(crate) async fn process_chat_sse<S>(
                     text_started = true;
                     let _ = tx
                         .send(Ok(ResponseEvent::OutputItemAdded(ResponseItem::Message {
+                            encrypted_content: None,
+                            status: None,
                             id: None,
                             role: "assistant".into(),
                             content: Vec::new(),
@@ -197,9 +199,15 @@ pub(crate) async fn process_chat_sse<S>(
     if !text.is_empty() {
         let _ = tx
             .send(Ok(ResponseEvent::OutputItemDone(ResponseItem::Message {
+                encrypted_content: None,
+                status: None,
                 id: None,
                 role: "assistant".into(),
-                content: vec![ContentItem::OutputText { text }],
+                content: vec![ContentItem::OutputText {
+                    text,
+                    annotations: None,
+                    logprobs: None,
+                }],
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             })))

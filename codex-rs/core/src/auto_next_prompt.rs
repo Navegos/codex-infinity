@@ -110,6 +110,7 @@ pub async fn generate_auto_next_prompt(
         /*include_timing_metrics*/ false,
         /*beta_features_header*/ None,
         /*concurrent_reasoning_summaries_enabled*/ false,
+        /*output_token_replay_enabled*/ false,
         /*attestation_provider*/ None,
         config.http_client_factory(),
         config.workspace_routing_context(),
@@ -130,6 +131,8 @@ pub async fn generate_auto_next_prompt(
 
     let prompt = Prompt {
         input: vec![ResponseItem::Message {
+            encrypted_content: None,
+            status: None,
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText { text: user_message }],

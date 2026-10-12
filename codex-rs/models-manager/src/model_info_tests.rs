@@ -46,7 +46,6 @@ fn sol_catalog_refresh_preserves_concise_prompt_and_other_messages() {
     let overridden = with_config_overrides(model, &config);
     let mut expected = expected.unwrap();
     expected.instructions_template = config.base_instructions;
-    expected.instructions_variables = None;
     assert_eq!(overridden.model_messages, Some(expected));
 }
 

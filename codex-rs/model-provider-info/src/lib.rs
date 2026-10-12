@@ -603,6 +603,7 @@ other non-default provider fields are not supported"
             supports_websockets: false,
             supports_standalone_web_search: false,
             include_internal_metadata: false,
+            capabilities: None,
         }
     }
 

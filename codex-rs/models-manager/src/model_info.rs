@@ -29,7 +29,6 @@ pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig)
     {
         let active = model.model_messages.get_or_insert_default();
         active.instructions_template = messages.instructions_template;
-        active.instructions_variables = messages.instructions_variables;
     }
     if let Some(context_window) = config.model_context_window {
         model.context_window = Some(

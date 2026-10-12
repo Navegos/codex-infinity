@@ -2012,6 +2012,7 @@ dependencies = [
  "codex-protocol",
  "codex-state",
  "codex-utils-absolute-path",
+ "codex-utils-path-uri",
  "os_info",
  "pretty_assertions",
  "serde",
@@ -2152,6 +2153,7 @@ dependencies = [
  "hmac 0.12.1",
  "http 1.4.0",
  "keyring",
+ "libc",
  "opentelemetry",
  "opentelemetry_sdk",
  "pretty_assertions",
@@ -2369,7 +2371,6 @@ dependencies = [
  "codex-install-context",
  "codex-linux-sandbox",
  "codex-sandboxing",
- "codex-shell-escalation",
  "codex-utils-absolute-path",
  "codex-utils-cargo-bin",
  "codex-utils-home-dir",
@@ -2737,6 +2738,7 @@ dependencies = [
  "http-body-util",
  "pretty_assertions",
  "prost",
+ "rand 0.9.3",
  "reqwest 0.12.28",
  "serde_json",
  "tokio",
@@ -2985,7 +2987,6 @@ dependencies = [
  "codex-rollout-trace",
  "codex-sandboxing",
  "codex-shell-command",
- "codex-shell-escalation",
  "codex-skills",
  "codex-skills-extension",
  "codex-state",
@@ -3019,6 +3020,7 @@ dependencies = [
  "eventsource-stream",
  "futures",
  "http 1.4.0",
+ "hyper-util",
  "iana-time-zone",
  "image",
  "indexmap 2.14.0",
@@ -3049,6 +3051,8 @@ dependencies = [
  "tokio-util",
  "toml 0.9.11+spec-1.1.0",
  "toml_edit 0.24.0+spec-1.1.0",
+ "tonic",
+ "tower",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -3233,6 +3237,8 @@ dependencies = [
  "codex-file-system",
  "codex-file-watcher",
  "codex-http-client",
+ "codex-linux-sandbox",
+ "codex-mxc-sandbox",
  "codex-network-proxy",
  "codex-otel",
  "codex-protocol",
@@ -3279,6 +3285,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "which 8.0.0",
  "windows-sys 0.61.2",
  "wiremock",
 ]
@@ -3439,6 +3446,8 @@ dependencies = [
  "pretty_assertions",
  "sentry",
  "serde_json",
+ "tar",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -3558,6 +3567,7 @@ dependencies = [
  "codex-history",
  "codex-protocol",
  "pretty_assertions",
+ "serde",
  "serde_json",
 ]
 
@@ -3608,9 +3618,11 @@ dependencies = [
  "codex-prompts",
  "codex-protocol",
  "codex-utils-cargo-bin",
+ "codex-websocket-client",
  "core_test_support",
  "dirs",
  "http 1.4.0",
+ "insta",
  "pretty_assertions",
  "serde_json",
  "tempfile",
@@ -3897,8 +3909,11 @@ dependencies = [
  "codex-plugin",
  "codex-protocol",
  "codex-rmcp-client",
+ "codex-utils-absolute-path",
+ "codex-utils-cargo-bin",
  "codex-utils-path-uri",
  "codex-utils-plugins",
+ "codex-utils-process",
  "futures",
  "insta",
  "lru",
@@ -4469,8 +4484,10 @@ dependencies = [
  "codex-protocol",
  "codex-state",
  "codex-utils-absolute-path",
+ "codex-utils-output-truncation",
  "codex-utils-path",
  "codex-utils-process",
+ "codex-utils-string",
  "memchr",
  "pretty_assertions",
  "regex",
@@ -4570,26 +4587,6 @@ dependencies = [
  "tree-sitter-powershell",
  "url",
  "which 8.0.0",
-]
-
-[[package]]
-name = "codex-shell-escalation"
-version = "0.159.3-infinity.1"
-dependencies = [
- "anyhow",
- "clap",
- "codex-protocol",
- "codex-utils-absolute-path",
- "libc",
- "pretty_assertions",
- "serde",
- "serde_json",
- "socket2 0.6.3",
- "tempfile",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -4778,7 +4775,6 @@ dependencies = [
  "codex-features",
  "codex-file-system",
  "codex-protocol",
- "codex-utils-absolute-path",
  "codex-utils-cargo-bin",
  "codex-utils-output-truncation",
  "codex-utils-path-uri",
@@ -4789,7 +4785,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "tracing",
  "urlencoding",
 ]
 
@@ -4874,6 +4869,7 @@ dependencies = [
  "libc",
  "objc2-app-kit",
  "objc2-foundation",
+ "opentelemetry_sdk",
  "pathdiff",
  "pretty_assertions",
  "pulldown-cmark",
@@ -5089,6 +5085,7 @@ dependencies = [
  "codex-protocol",
  "codex-utils-string",
  "pretty_assertions",
+ "serde_json",
 ]
 
 [[package]]
@@ -5824,12 +5821,11 @@ checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 [[package]]
 name = "crossterm"
 version = "0.29.0"
-source = "git+https://github.com/openai-oss-forks/crossterm?rev=efa177859fd9623d57b9fe7ae9bf491ae1ac6ec4#efa177859fd9623d57b9fe7ae9bf491ae1ac6ec4"
+source = "git+https://github.com/openai-oss-forks/crossterm?rev=ed1cdab335221515706178d68495bba2aed1924f#ed1cdab335221515706178d68495bba2aed1924f"
 dependencies = [
  "bitflags 2.13.1",
  "crossterm_winapi",
  "derive_more 2.1.1",
- "document-features",
  "futures-core",
  "mio",
  "parking_lot",
@@ -13105,8 +13101,8 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "3.3.0"
-source = "git+https://github.com/modelcontextprotocol/rust-sdk?rev=3e636cab26c013eca5131103c03d20237f12c4df#3e636cab26c013eca5131103c03d20237f12c4df"
+version = "3.5.1"
+source = "git+https://github.com/modelcontextprotocol/rust-sdk?rev=4048ac40e958fb1a7d614617a2ae8d26666ee2fa#4048ac40e958fb1a7d614617a2ae8d26666ee2fa"
 dependencies = [
  "async-trait",
  "base64 0.23.0",
@@ -13140,8 +13136,8 @@ dependencies = [
 
 [[package]]
 name = "rmcp-macros"
-version = "3.3.0"
-source = "git+https://github.com/modelcontextprotocol/rust-sdk?rev=3e636cab26c013eca5131103c03d20237f12c4df#3e636cab26c013eca5131103c03d20237f12c4df"
+version = "3.5.1"
+source = "git+https://github.com/modelcontextprotocol/rust-sdk?rev=4048ac40e958fb1a7d614617a2ae8d26666ee2fa#4048ac40e958fb1a7d614617a2ae8d26666ee2fa"
 dependencies = [
  "darling 0.24.0",
  "proc-macro2",
