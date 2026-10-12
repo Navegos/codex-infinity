@@ -1,8 +1,11 @@
 use crate::function_tool::FunctionCallError;
+use codex_features::Feature;
+
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
 use crate::tools::handlers::parse_arguments;
+use crate::tools::handlers::resolve_tool_environment;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::PostToolUsePayload;
 use crate::tools::registry::PreToolUsePayload;
@@ -79,6 +82,18 @@ impl WriteStdinHandler {
         };
 
         let args: WriteStdinArgs = parse_arguments(&arguments)?;
+        if turn
+            .config
+            .features
+            .get()
+            .enabled(Feature::StableEnvironmentTools)
+        {
+            resolve_tool_environment(
+                &step_context,
+                /*environment_id*/ None,
+                "unified exec is unavailable in this session",
+            )?;
+        }
         let yield_time_ms =
             args.yield_time_ms
                 .unwrap_or(if args.chars.is_empty() { 30_000 } else { 250 });

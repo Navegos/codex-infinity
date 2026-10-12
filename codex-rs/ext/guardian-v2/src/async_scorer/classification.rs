@@ -36,6 +36,7 @@ use codex_prompts::ResolvedModelMessages;
 use codex_protocol::models::ContentItem;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::security_risk::SecurityRiskScore;
+use codex_protocol::turn_input::CyberAccessProgram;
 
 use super::authorization::ScoreAuthorization;
 use super::config::GuardianV2Config;
@@ -71,6 +72,7 @@ pub(super) struct Classification {
     pub(super) thread_id: String,
     pub(super) turn_id: String,
     pub(super) root_turn_id: Option<String>,
+    pub(super) cyber_access_program: Option<CyberAccessProgram>,
     pub(super) parent_response_id: Option<String>,
     pub(super) manager: Arc<ThreadManager>,
     pub(super) thread: Arc<CodexThread>,
@@ -106,6 +108,19 @@ enum ClassificationOutcome {
 }
 
 impl Classification {
+    #[tracing::instrument(
+        name = "guardian_background_scoring",
+        level = "debug",
+        skip_all,
+        fields(
+            thread_id = %self.thread_id,
+            turn_id = %self.turn_id,
+            call_id = %self.call_id,
+            tool_call_index = self.tool_call_index,
+            context_mode = self.context_mode.as_str(),
+            retained_conversation = self.reservation.is_some(),
+        )
+    )]
     pub(super) async fn run(self) {
         let Self {
             reservation,
@@ -123,6 +138,7 @@ impl Classification {
             thread_id,
             turn_id,
             root_turn_id,
+            cyber_access_program,
             parent_response_id,
             manager,
             thread,
@@ -266,6 +282,7 @@ impl Classification {
             super::metrics::record_section_costs(metrics.as_deref(), context.section_costs());
         }
         let mut decisions_task = None;
+        let mut responses_duration = None;
         let mut failure_reason = "invalid_output";
         let mut classification_risk = None;
         let mut classification_finished_at = None;
@@ -298,6 +315,7 @@ impl Classification {
             let extra_policy = config.guardian_extra_policy.as_deref().unwrap_or_default();
             let instructions = guardian_config.render_classifier_instructions(policy, extra_policy);
             let mut sampling = LunaSamplingRequest {
+                cyber_access_program,
                 parent_response_id,
                 instructions,
                 input: Vec::new(),
@@ -323,7 +341,10 @@ impl Classification {
                             "not_initialized",
                         );
                     }
-                    sampler.sample(sampling).await
+                    let sampling_started = Instant::now();
+                    let result = sampler.sample(sampling).await;
+                    responses_duration = Some(sampling_started.elapsed());
+                    result
                 }
 
                 ClassificationContext::Conversation {
@@ -342,16 +363,16 @@ impl Classification {
                         );
                     }
                     let (ready, score) = tokio::sync::oneshot::channel();
-                    reservation.submit(ConversationRequest {
+                    tokio::spawn(reservation.run(ConversationRequest {
                         evidence,
                         sampling,
-                        reset_token_limit: guardian_config
-                            .async_classifier_conversation_token_limit,
+                        reset_token_limit:
+                            guardian_config.async_classifier_conversation_token_limit,
                         ready,
                         authorization: score_authorization.clone(),
                         thread: Arc::clone(&thread),
                         metrics: metrics.clone(),
-                    });
+                    }));
                     score.await.unwrap_or(Err(LunaSamplerError::Superseded))
                 }
             };
@@ -468,6 +489,12 @@ impl Classification {
                 "superseded",
             );
         }
+        // Only compare against a score accepted by the authoritative publication path.
+        let baseline_risk = if matches!(result, Ok(ClassificationOutcome::Scored)) {
+            classification_risk
+        } else {
+            None
+        };
         if let Err(error) = result {
             event_sink.emit_warning(ExtensionWarning {
                 thread_id,
@@ -476,9 +503,26 @@ impl Classification {
             });
         }
         if let Some(decisions_task) = decisions_task {
-            decisions_task
-                .finish_and_record_outcome(metrics.as_deref())
-                .await;
+            super::metrics::record_decisions_comparison(
+                decisions_task.finish().await,
+                baseline_risk.zip(responses_duration),
+                metrics.as_deref(),
+            );
+        } else if config
+            .features
+            .enabled(codex_features::Feature::GuardianV2DecisionsComparison)
+            && let Some(risk) = baseline_risk
+            && let Some(metrics) = metrics.as_deref()
+        {
+            metrics.counter(
+                "codex.guardian_v2.decisions_comparison.comparison",
+                /*inc*/ 1,
+                &[
+                    ("comparison", "unavailable"),
+                    ("responses", risk),
+                    ("decisions", "unavailable"),
+                ],
+            );
         }
     }
 }
