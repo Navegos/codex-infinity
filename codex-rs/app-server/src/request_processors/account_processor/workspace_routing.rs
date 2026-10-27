@@ -257,13 +257,35 @@ impl AccountRequestProcessor {
         params: GetAccountParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         self.refresh_token_if_requested(params.refresh_token).await;
-        let read = self
-            .read_account(/*request*/ None)
-            .await
-            .map_err(|error| match error {
-                AccountReadError::InvalidAccount(error) => invalid_request(error.to_string()),
-                AccountReadError::Routing(error) => internal_error(error.to_string()),
-            })?;
+        let read = match self.read_account(/*request*/ None).await {
+            Ok(read) => read,
+            Err(AccountReadError::Routing(
+                WorkspaceRoutingError::DiscoveryUnauthorized
+                | WorkspaceRoutingError::DiscoveryFailed,
+            )) => {
+                let config = self
+                    .config_manager
+                    .load_latest_config(/*fallback_cwd*/ None)
+                    .await
+                    .map_err(|error| internal_error(error.to_string()))?;
+                let provider = create_model_provider(
+                    config.model_provider.clone(),
+                    Some(self.auth_manager.clone()),
+                );
+                AccountRead {
+                    account_state: provider
+                        .account_state()
+                        .map_err(|error| invalid_request(error.to_string()))?,
+                    workspace_routing: None,
+                }
+            }
+            Err(error) => {
+                return Err(match error {
+                    AccountReadError::InvalidAccount(error) => invalid_request(error.to_string()),
+                    AccountReadError::Routing(error) => internal_error(error.to_string()),
+                });
+            }
+        };
         Ok(Some(
             GetAccountResponse {
                 account: read.account_state.account.map(Account::from),
