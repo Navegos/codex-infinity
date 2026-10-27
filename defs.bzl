@@ -193,6 +193,7 @@ def codex_rust_crate(
         build_script_data = [],
         compile_data = [],
         binary_compile_data_extra = {},
+        test_only_binaries = [],
         lib_data_extra = [],
         rustc_flags_extra = [],
         binary_rustc_flags_extra = {},
@@ -238,6 +239,7 @@ def codex_rust_crate(
         compile_data: Non-Rust compile-time data for the library target.
         binary_compile_data_extra: Mapping from binary names to extra non-Rust
             compile-time data for those binary targets.
+        test_only_binaries: Binary names used only as test fixtures.
         lib_data_extra: Extra runtime data for the library target.
         binary_rustc_flags_extra: Mapping from binary names to extra rustc
             flags for those binary targets.
@@ -415,9 +417,15 @@ def codex_rust_crate(
             edition = crate_edition,
             # Scope each binary's compile data and linker flags to its generated
             # rust_binary so they do not affect sibling binaries.
-            compile_data = binary_compile_data_extra.get(binary, []),
+            compile_data = binary_compile_data_extra.get(binary, []) + select({
+                "@platforms//os:macos": ["//bazel/tools:dsymutil"],
+                "//conditions:default": [],
+            }),
             rustc_flags = rustc_flags_extra + binary_rustc_flags_extra.get(binary, []) + WINDOWS_RUSTC_LINK_FLAGS,
-            rustc_env = rustc_env,
+            rustc_env = select({
+                "@platforms//os:macos": rustc_env | {"PATH": "$${pwd}/bazel/tools:/bin:/usr/bin:/usr/local/bin"},
+                "//conditions:default": rustc_env,
+            }),
             # Keep stamp = 0: rules_rust otherwise makes stable-status.txt and
             # volatile-status.txt compiler inputs, even though we only consume
             # STABLE_GIT_COMMIT. BUILD_USER and BUILD_HOST vary across developers
@@ -426,7 +434,8 @@ def codex_rust_crate(
             # Isolate status inputs in build-commit-env's cheap action so its
             # output, and hence this compiler input, changes only with the commit.
             rustc_env_files = ["//bazel/build-info:build-commit-env"] if binary in binaries_with_build_commit else [],
-            srcs = native.glob(["src/**/*.rs"]),
+            srcs = native.glob(["src/**/*.rs"], exclude = [main], allow_empty = True) + [main],
+            testonly = binary in test_only_binaries,
             stamp = 0,
             version = crate_version,
             visibility = ["//visibility:public"],

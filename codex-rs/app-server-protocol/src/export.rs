@@ -2262,14 +2262,14 @@ mod tests {
                 continue;
             }
 
-            // Only allow "?: T | null" in objects representing JSON-RPC requests,
-            // which we assume are called "*Params".
+            // Allow "?: T | null" in JSON-RPC request objects and nested request types.
             let allow_optional_nullable = path
                 .file_stem()
                 .and_then(|stem| stem.to_str())
                 .is_some_and(|stem| {
                     stem.ends_with("Params")
                         || stem == "InitializeCapabilities"
+                        || stem == "AdditionalContextEntry"
                         || matches!(
                             stem,
                             "CollabAgentRef"
@@ -2409,6 +2409,8 @@ mod tests {
                 let legacy_optional_nullable_field = (path
                     == Path::new("v2/GetAccountTokenUsageResponse.ts")
                     && field_prefix.trim() == "threadUsage?")
+                    || (path == Path::new("v2/ThreadUsage.ts")
+                        && field_prefix.trim() == "nativeUsageUsdMicros?")
                     || (path == Path::new("v2/McpServerOauthLoginCompletedNotification.ts")
                         && field_prefix.trim() == "loginId?")
                     || (path == Path::new("v2/MisalignmentErrorDetails.ts")
@@ -2491,32 +2493,6 @@ mod tests {
             true
         );
 
-        Ok(())
-    }
-
-    #[test]
-    fn stable_schema_filter_removes_mock_thread_start_field() -> Result<()> {
-        let output_dir = std::env::temp_dir().join(format!("codex_schema_{}", Uuid::now_v7()));
-        fs::create_dir(&output_dir)?;
-        let schema = write_json_schema_with_return::<v2::ThreadStartParams>(
-            &output_dir,
-            "ThreadStartParams",
-        )?;
-        let mut bundle = build_schema_bundle(vec![schema])?;
-        filter_experimental_schema(&mut bundle)?;
-
-        let definitions = bundle["definitions"]
-            .as_object()
-            .expect("schema bundle should include definitions");
-        let (_, def_schema) = definitions
-            .iter()
-            .find(|(name, _)| definition_matches_type(name, "ThreadStartParams"))
-            .expect("ThreadStartParams definition should exist");
-        let properties = def_schema["properties"]
-            .as_object()
-            .expect("ThreadStartParams should have properties");
-        assert_eq!(properties.contains_key("mockExperimentalField"), false);
-        let _cleanup = fs::remove_dir_all(&output_dir);
         Ok(())
     }
 
@@ -2925,21 +2901,6 @@ permissionProfile?: string | null};
             filtered.contains(r#"import type { SandboxPolicy } from "./SandboxPolicy";"#),
             true
         );
-        Ok(())
-    }
-
-    #[test]
-    fn stable_schema_filter_removes_mock_experimental_method() -> Result<()> {
-        let output_dir = std::env::temp_dir().join(format!("codex_schema_{}", Uuid::now_v7()));
-        fs::create_dir(&output_dir)?;
-        let schema =
-            write_json_schema_with_return::<crate::ClientRequest>(&output_dir, "ClientRequest")?;
-        let mut bundle = build_schema_bundle(vec![schema])?;
-        filter_experimental_schema(&mut bundle)?;
-
-        let bundle_str = serde_json::to_string(&bundle)?;
-        assert_eq!(bundle_str.contains("mock/experimentalMethod"), false);
-        let _cleanup = fs::remove_dir_all(&output_dir);
         Ok(())
     }
 

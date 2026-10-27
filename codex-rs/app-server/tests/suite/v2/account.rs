@@ -9,6 +9,12 @@ use app_test_support::DEFAULT_CLIENT_NAME;
 use app_test_support::encode_id_token;
 use app_test_support::write_chatgpt_auth;
 use app_test_support::write_models_cache;
+use axum::Router;
+use axum::body::Body;
+use axum::http::HeaderMap;
+use axum::http::Uri;
+use axum::http::header::HOST;
+use axum::routing::get;
 use chrono::Duration as ChronoDuration;
 use chrono::Utc;
 use codex_app_server_protocol::Account;
@@ -61,8 +67,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 use test_case::test_case;
+use tokio::net::TcpListener;
 use tokio::sync::Notify;
 use tokio::time::timeout;
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::AbortOnDropHandle;
 use url::Url;
 use wiremock::Mock;
 use wiremock::MockServer;
@@ -2296,11 +2305,53 @@ async fn login_survives_same_owner_token_refresh(
 ) -> Result<()> {
     let codex_home = TempDir::new()?;
     let backend = MockServer::start().await;
+    let release_response = CancellationToken::new();
+    let (chatgpt_base_url, _response_gate) = match refresh_trigger {
+        LoginRefreshTrigger::AuthStatus => {
+            let listener = TcpListener::bind("127.0.0.1:0").await?;
+            let base_url = format!("http://{}/backend-api", listener.local_addr()?);
+            let upstream = backend.uri();
+            let gated_path = delayed_path.to_string();
+            let release = release_response.clone();
+            let client = HttpClientBuilder::new().build_direct()?;
+            // Keep Wiremock's matching and request recording, but hold the response
+            // asynchronously so the token refresh can use the same mock backend.
+            let router = Router::new().fallback(get(move |uri: Uri, mut headers: HeaderMap| {
+                let upstream = upstream.clone();
+                let gated_path = gated_path.clone();
+                let release = release.clone();
+                let client = client.clone();
+                async move {
+                    let hold_response = uri.path() == gated_path
+                        && headers
+                            .get("authorization")
+                            .is_some_and(|value| value == "Bearer access-token-123");
+                    headers.remove(HOST);
+                    let response = client
+                        .get(format!("{upstream}{uri}"))
+                        .headers(headers)
+                        .send()
+                        .await
+                        .expect("mock backend response");
+                    if hold_response {
+                        release.cancelled().await;
+                    }
+                    response.into_http_response().map(Body::new)
+                }
+            }));
+            let task =
+                AbortOnDropHandle::new(tokio::spawn(
+                    async move { axum::serve(listener, router).await },
+                ));
+            (base_url, Some(task))
+        }
+        LoginRefreshTrigger::UnauthorizedConfig => (format!("{}/backend-api", backend.uri()), None),
+    };
     create_config_toml(
         codex_home.path(),
         CreateConfigTomlParams {
             requires_openai_auth: Some(true),
-            chatgpt_base_url: Some(format!("{}/backend-api", backend.uri())),
+            chatgpt_base_url: Some(chatgpt_base_url),
             ..Default::default()
         },
     )?;
@@ -2352,11 +2403,11 @@ async fn login_survives_same_owner_token_refresh(
                 .and(header("authorization", "Bearer access-token-123"))
                 .respond_with(move |_: &wiremock::Request| {
                     request_started.notify_one();
-                    ResponseTemplate::new(match refresh_trigger {
-                        LoginRefreshTrigger::AuthStatus => 200,
-                        LoginRefreshTrigger::UnauthorizedConfig => 401,
-                    })
-                    .set_delay(Duration::from_secs(/*secs*/ 2))
+                    match refresh_trigger {
+                        LoginRefreshTrigger::AuthStatus => ResponseTemplate::new(200),
+                        LoginRefreshTrigger::UnauthorizedConfig => ResponseTemplate::new(401)
+                            .set_delay(Duration::from_secs(/*secs*/ 2)),
+                    }
                     .set_body_json(response.clone())
                 })
                 .with_priority(1)
@@ -2368,6 +2419,7 @@ async fn login_survives_same_owner_token_refresh(
     let issuer = backend.uri();
     let refresh_url = format!("{issuer}/oauth/refresh");
     let mut server = TestAppServer::builder()
+        .with_json_logging("warn,codex_login::auth::manager=info,codex_app_server=info")
         .with_codex_home(codex_home.path())
         .with_env_overrides(&[
             ("OPENAI_API_KEY", None),
@@ -2404,6 +2456,26 @@ async fn login_survives_same_owner_token_refresh(
                     refresh_token: Some(true),
                 })
                 .await?;
+            // getAuthStatus reloads config before replying, which can wait for
+            // this held response. The reload log records the credential change
+            // after publishing the refreshed auth cache and its generation.
+            let request_id = request.to_string();
+            server
+                .wait_for_matching_json_log_event(
+                    "auth cache refresh in getAuthStatus",
+                    |event| {
+                        event["fields"]["auth_changed_for_refresh"] == true
+                            && event["spans"].as_array().is_some_and(|spans| {
+                                spans.iter().any(|span| {
+                                    span["rpc.method"] == "getAuthStatus"
+                                        && span["rpc.request_id"] == request_id
+                                })
+                            })
+                    },
+                    DEFAULT_READ_TIMEOUT,
+                )
+                .await?;
+            release_response.cancel();
             let refreshed: GetAuthStatusResponse =
                 timeout(DEFAULT_READ_TIMEOUT, server.read_response(request)).await??;
             assert_eq!(
@@ -2687,12 +2759,44 @@ async fn login_account_chatgpt_start_can_be_cancelled() -> Result<()> {
 #[serial(login_port)]
 async fn login_account_chatgpt_uses_oauth_overrides() -> Result<()> {
     let codex_home = TempDir::new()?;
-    create_config_toml(codex_home.path(), CreateConfigTomlParams::default())?;
     let mock_server = MockServer::start().await;
+    create_config_toml(
+        codex_home.path(),
+        CreateConfigTomlParams {
+            chatgpt_base_url: Some(format!("{}/backend-api", mock_server.uri())),
+            ..Default::default()
+        },
+    )?;
+    app_test_support::mount_workspace_routing(&mock_server).await;
+    let requirements = format!(
+        "model_provider = 'gateway'\n[model_providers.gateway]\nname = 'Gateway'\nrequires_openai_auth = true\nbase_url = '{0}/v1'\nmodel_catalog_url = '{0}/v1/models'",
+        mock_server.uri(),
+    );
+    Mock::given(method("GET"))
+        .and(path("/backend-api/wham/config/bundle"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "requirements_toml": {"enterprise_managed": [{
+                "id": "gateway", "name": "Gateway", "contents": requirements,
+            }]}
+        })))
+        .mount(&mock_server)
+        .await;
+    let mut model = codex_models_manager::bundled_models_response()?
+        .models
+        .remove(0);
+    model.slug = "workspace-gateway-model".into();
+    model.visibility = codex_protocol::openai_models::ModelVisibility::List;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .and(header("authorization", "Bearer access-token-123"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"models": [model]})))
+        .expect(1..)
+        .mount(&mock_server)
+        .await;
     let id_token = encode_id_token(
         &ChatGptIdTokenClaims::new()
             .email("staging@example.com")
-            .plan_type("pro")
+            .plan_type("enterprise")
             .chatgpt_account_id(WORKSPACE_ID_EMBEDDED),
     )?;
     mock_oauth_token(&mock_server, &id_token).await;
@@ -2710,6 +2814,15 @@ async fn login_account_chatgpt_uses_oauth_overrides() -> Result<()> {
         ])
         .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
         .await?;
+
+    let request = mcp.send_list_models_request(Default::default()).await?;
+    let initial: codex_app_server_protocol::ModelListResponse = mcp.read_response(request).await?;
+    assert!(
+        !initial
+            .data
+            .iter()
+            .any(|model| model.id == "workspace-gateway-model")
+    );
 
     let request_id = mcp.send_login_account_chatgpt_request().await?;
     let login: LoginAccountResponse =
@@ -2789,6 +2902,18 @@ async fn login_account_chatgpt_uses_oauth_overrides() -> Result<()> {
             onboarding_entrypoint: None,
         }
     );
+    // Listing immediately after asynchronous login completion must use the new cloud provider.
+    let request = mcp.send_list_models_request(Default::default()).await?;
+    let models: codex_app_server_protocol::ModelListResponse = mcp.read_response(request).await?;
+    assert_eq!(
+        models
+            .data
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["workspace-gateway-model"]
+    );
+    mock_server.verify().await;
     Ok(())
 }
 
@@ -3371,6 +3496,8 @@ async fn get_account_with_chatgpt() -> Result<()> {
 #[test_case("self_serve_business_prolite", AccountPlanType::SelfServeBusinessProLite; "business_prolite")]
 #[test_case("edu_plus", AccountPlanType::EduPlus; "edu_plus")]
 #[test_case("edu_pro", AccountPlanType::EduPro; "edu_pro")]
+#[test_case("sci", AccountPlanType::Sci; "sci")]
+#[test_case("sci_plus", AccountPlanType::SciPlus; "sci_plus")]
 #[tokio::test]
 async fn get_account_with_chatgpt_plan_variants_returns_plan_type(
     plan_type: &str,

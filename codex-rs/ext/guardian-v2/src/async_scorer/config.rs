@@ -24,7 +24,7 @@ use super::transcript::TranscriptSource;
 pub(crate) const DEFAULT_MODEL_CONTEXT_ITEM_TOKENS: usize = 10_000;
 pub(crate) const DEFAULT_PARENT_COMPACTION_TOKENS: usize = 25_000;
 const MIN_MODEL_CONTEXT_ITEM_TOKENS: usize = 100;
-const MAX_MODEL_CONTEXT_ITEM_TOKENS: usize = 100_000;
+pub(super) const MAX_MODEL_CONTEXT_ITEM_TOKENS: usize = 100_000;
 const DEFAULT_REVIEW_THRESHOLD: f64 = 0.5;
 const LEGACY_REVIEW_THRESHOLD: f64 = 0.8;
 const DEFAULT_MAX_TOOL_CALL_LAG: usize = 2;
@@ -51,16 +51,6 @@ pub(crate) struct GuardianV2Config {
 }
 
 impl GuardianV2Config {
-    pub(super) fn classifier_mode(
-        &self,
-        model_defaults: Option<&GuardianV2ModelConfig>,
-    ) -> codex_protocol::openai_models::AsyncClassifierMode {
-        self.local_overrides
-            .async_classifier_mode
-            .or_else(|| model_defaults.and_then(|defaults| defaults.async_classifier_mode))
-            .unwrap_or_default()
-    }
-
     pub(crate) fn resolve(config: &Config) -> Result<Self, String> {
         let effective_config = config.config_layer_stack.effective_config();
         let mut configured = match effective_config

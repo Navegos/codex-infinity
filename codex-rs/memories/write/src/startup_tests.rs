@@ -442,6 +442,46 @@ async fn memories_startup_phase2_tracks_workspace_diff_across_runs() -> anyhow::
 }
 
 #[tokio::test]
+async fn phase2_replays_legacy_baseline_with_unchanged_inputs() -> anyhow::Result<()> {
+    let server = start_mock_server().await;
+    let home = Arc::new(TempDir::new()?);
+    let db = init_state_db(&home).await?;
+    let root = home.path().join("memories");
+    db.memories()
+        .enqueue_global_consolidation(/*input_watermark*/ 1)
+        .await?;
+    sync_rollout_summaries_from_memories(&root, &[], /*max_raw_memories_for_consolidation*/ 0)
+        .await?;
+    rebuild_raw_memories_file_from_memories(
+        &root,
+        &[],
+        /*max_raw_memories_for_consolidation*/ 0,
+    )
+    .await?;
+    seed_extension_instructions(&root).await?;
+    seed_required_memory_artifacts(&root).await?;
+    reset_git_repository(&root).await?;
+    assert!(!diff_since_latest_init(&root).await?.has_changes());
+    tokio::fs::remove_file(root.join(".git/codex-baseline-version")).await?;
+
+    let phase2 = mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("resp-phase2-replay"),
+            ev_assistant_message("msg-phase2-replay", "phase2 complete"),
+            ev_completed("resp-phase2-replay"),
+        ]),
+    )
+    .await;
+    let test = build_test_codex(&server, home.clone()).await?;
+    trigger_memories_startup(&test).await;
+    wait_for_single_request(&phase2).await;
+    wait_for_phase2_workspace_reset(db.memories(), &root).await?;
+    shutdown_test_codex(&test).await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn phase2_retries_when_clean_workspace_is_missing_artifacts() -> anyhow::Result<()> {
     let server = start_mock_server().await;
     let home = Arc::new(TempDir::new()?);
@@ -520,12 +560,12 @@ async fn memories_startup_phase2_prunes_old_extension_resources() -> anyhow::Res
     .await?;
     let old_file = chronicle_resources.join(format!(
         "{}-abcd-10min-old.md",
-        (now - chrono::Duration::days(8)).format("%Y-%m-%dT%H-%M-%S")
+        (now - chrono::Duration::days(15)).format("%Y-%m-%dT%H-%M-%S")
     ));
     tokio::fs::write(&old_file, "old resource").await?;
     let recent_file = chronicle_resources.join(format!(
         "{}-abcd-10min-recent.md",
-        (now - chrono::Duration::days(6)).format("%Y-%m-%dT%H-%M-%S")
+        (now - chrono::Duration::days(13)).format("%Y-%m-%dT%H-%M-%S")
     ));
     tokio::fs::write(&recent_file, "recent resource").await?;
     seed_required_memory_artifacts(&home.path().join("memories")).await?;
@@ -586,7 +626,7 @@ async fn memories_startup_phase2_prunes_old_extension_resources_without_stage1_i
     .await?;
     let old_file = chronicle_resources.join(format!(
         "{}-abcd-10min-old.md",
-        (now - chrono::Duration::days(8)).format("%Y-%m-%dT%H-%M-%S")
+        (now - chrono::Duration::days(15)).format("%Y-%m-%dT%H-%M-%S")
     ));
     tokio::fs::write(&old_file, "old resource").await?;
     seed_required_memory_artifacts(&home.path().join("memories")).await?;
@@ -897,6 +937,44 @@ async fn run_memory_phase_one_model_request_test(
         contents.push_str(&serde_json::to_string(&line)?);
         contents.push('\n');
     }
+    // Each block exceeds the 8 MiB reader budget, while each record stays below 1 MiB.
+    // Excluded items and ciphertext must not displace the earlier extraction evidence.
+    for item in [
+        json!({"type":"reasoning", "summary":[],
+            "encrypted_content":"r".repeat(/*n*/ 512 * 1024)}),
+        json!({"type":"message", "role":"developer", "content":[
+            {"type":"input_text", "text":"d".repeat(/*n*/ 512 * 1024)},
+        ]}),
+        json!({"type":"message", "role":"assistant", "phase":"final_answer",
+        "encrypted_content":"a".repeat(/*n*/ 512 * 1024), "content":[
+            {"type":"output_text", "text":"small assistant evidence behind ciphertext"},
+        ]}),
+    ] {
+        let line = RolloutLine {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            ordinal: None,
+            item: RolloutItem::ResponseItem(serde_json::from_value::<ResponseItem>(item)?.into()),
+        };
+        let line = serde_json::to_string(&line)?;
+        for _ in 0..16 {
+            contents.push_str(&line);
+            contents.push('\n');
+        }
+    }
+    // Exercise bounded reading through the actual extraction request, for both memory versions.
+    contents.push_str(&"x".repeat(1024 * 1024 + 1));
+    contents.push('\n');
+    contents.push_str(
+        &json!({
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "type": "response_item",
+            "payload": {"type": "message", "role": "user", "content": [
+                {"type": "input_text", "text": "newest correction after an oversized record"}
+            ]}
+        })
+        .to_string(),
+    );
+    contents.push('\n');
     tokio::fs::write(&path, &contents).await?;
     db.update_thread_git_info(
         source_id,
@@ -935,6 +1013,8 @@ async fn run_memory_phase_one_model_request_test(
     let request = wait_for_single_request(&response).await;
     let evidence = request.message_input_texts("user").join("");
     assert!(evidence.contains("replay-bearing assistant evidence"));
+    assert!(evidence.contains("small assistant evidence behind ciphertext"));
+    assert!(evidence.contains("newest correction after an oversized record"));
     assert!(!evidence.contains("encrypted_content"));
     if version == codex_protocol::MemoryVersion::V1 {
         assert!(evidence.contains("memory_test_tool"));
@@ -1272,7 +1352,18 @@ async fn seed_stage1_candidate(
         ),
     };
     let jsonl = serde_json::to_string(&line)?;
-    tokio::fs::write(&rollout_path, format!("{jsonl}\n")).await?;
+    let meta = json!({
+        "timestamp": updated_at.to_rfc3339(),
+        "type": "session_meta",
+        "payload": codex_rollout::SessionMeta {
+            id: thread_id,
+            session_id: thread_id.into(),
+            timestamp: updated_at.to_rfc3339(),
+            cwd: codex_home.to_path_buf(),
+            ..Default::default()
+        }
+    });
+    tokio::fs::write(&rollout_path, format!("{meta}\n{jsonl}\n")).await?;
 
     let mut metadata_builder = codex_state::ThreadMetadataBuilder::new(
         thread_id,

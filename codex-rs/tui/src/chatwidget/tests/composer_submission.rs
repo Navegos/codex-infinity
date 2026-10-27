@@ -325,6 +325,7 @@ async fn parent_owned_thread_blocks_settings_shortcuts() {
         event,
         AppEvent::SubmitThreadOp { .. }
             | AppEvent::UpdateModel(_)
+            | AppEvent::ApplyModelSelection { .. }
             | AppEvent::UpdateReasoningEffort(_)
             | AppEvent::UpdatePlanModeReasoningEffort(_)
     )));
@@ -1878,6 +1879,8 @@ async fn restore_thread_input_state_applies_running_state_policy() {
     let input_state = ThreadInputState {
         questions: None,
         pending_thread_settings: None,
+        initial_user_message: None,
+        startup_submission: None,
         composer: Some(ThreadComposerState {
             text: "composer draft".to_string(),
             ..Default::default()
@@ -1901,6 +1904,7 @@ async fn restore_thread_input_state_applies_running_state_policy() {
         current_collaboration_mode: chat.current_collaboration_mode.clone(),
         active_collaboration_mask: chat.active_collaboration_mask.clone(),
         plan_mode_reasoning_effort: chat.config.plan_mode_reasoning_effort.clone(),
+        status_surface_overrides: StatusSurfaceOverrides::default(),
         task_running: true,
         agent_turn_running: true,
     };

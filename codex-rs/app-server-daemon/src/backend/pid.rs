@@ -93,6 +93,15 @@ impl PidBackend {
     pub(crate) async fn running_executable_identity(&self) -> Result<Option<ExecutableIdentity>> {
         match self.read_pid_file_state().await? {
             PidFileState::Running(record) if self.record_is_active(&record).await? => {
+                // Updaters can exec a different release without changing PID. Only the
+                // updater itself can reliably identify its executable after a handoff.
+                if matches!(self.command_kind, PidCommandKind::UpdateLoop { .. })
+                    && record.pid == std::process::id()
+                {
+                    return crate::managed_install::executable_identity(&std::env::current_exe()?)
+                        .await
+                        .map(Some);
+                }
                 Ok(record.executable_identity)
             }
             _ => Ok(None),
@@ -451,6 +460,20 @@ impl PidBackend {
     }
 }
 
+/// Wait for a published process to exit without modifying its PID reservation.
+pub(crate) async fn wait_for_process_exit(pid_file: &Path) {
+    loop {
+        // A missing or empty record can belong to a launch still publishing its PID.
+        if let Ok(contents) = fs::read(pid_file).await
+            && let Ok(record) = serde_json::from_slice::<PidRecord>(&contents)
+            && matches!(process_matches_record(&record).await, Ok(false))
+        {
+            return;
+        }
+        sleep(crate::START_POLL_INTERVAL).await;
+    }
+}
+
 pub(crate) async fn read_stderr_log_tail(pid_file: &Path) -> Result<Option<PidLogTail>> {
     let path = stderr_log_file_for_pid_file(pid_file);
     let Some(contents) = read_log_tail(&path, STDERR_LOG_TAIL_BYTES).await? else {
@@ -748,6 +771,7 @@ async fn read_process_start_time(pid: u32) -> Result<String> {
 async fn read_process_details(pid: u32) -> Result<(String, String)> {
     let output = Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "stat=", "-o", "lstart="])
+        .kill_on_drop(true)
         .output()
         .await
         .context("failed to invoke ps for pid-managed app server")?;

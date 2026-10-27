@@ -28,6 +28,11 @@ pub use action::PlannedAction;
 pub use action::PlannedActionKind;
 pub use action::action_for_review;
 pub use authorization::GuardianRootMessage;
+pub use preparation::root::RootAssistantCandidate;
+pub use preparation::root::RootAssistantContent;
+pub use preparation::root::RootDeliveredMessage;
+pub use preparation::root::RootMessageCandidate;
+pub use preparation::root::RootRetainedAssistant;
 pub use section::ContextSection;
 
 pub use entry::ConversationTranscriptEntry;
@@ -46,12 +51,15 @@ pub use truncation::truncate_text;
 
 mod verified_answers;
 pub use verified_answers::RenderedVerifiedAnswers;
+pub use verified_answers::TrustedUserAnswer;
+pub use verified_answers::collect_verified_answer_candidates;
+pub use verified_answers::render_original_verified_answer;
 pub use verified_answers::render_verified_answer;
 pub use verified_answers::render_verified_answers;
 
-mod retained_assistant_context;
 mod retained_instructions;
 mod sender_user_messages;
+pub use retained_instructions::RetainedInstructionItem;
 pub use retained_instructions::retained_assistant_message;
 
 mod action;
@@ -72,15 +80,22 @@ pub use budget::SECTION_COST_METRIC;
 pub use budget::SectionCost;
 pub use budget::effective_input_token_limit;
 pub use budget::estimate_input_tokens;
+pub use budget::estimate_input_tokens_from_serialized_len;
+pub use budget::request_token_bucket;
 pub use cursor::TranscriptCursor;
 pub use cursor::TranscriptMode;
 pub use cursor::TranscriptSelection;
+mod preparation;
 mod profile;
 pub use codex_protocol::TranscriptFormat;
 pub use composition::CollectedContext;
 pub use composition::ComposedContext;
 pub use composition::ContextPresentation;
 pub use composition::PreparedTranscript;
+pub use preparation::root::PreparedRootAssistants;
+pub use preparation::root::prepare_root_assistant_messages;
+pub use preparation::root::prepare_root_user_messages;
+pub use preparation::root::select_root_handoff_indices;
 pub use profile::ContextProfile;
 mod authorization;
 mod entry;
@@ -94,6 +109,8 @@ pub use node_repl::RenderedNodeReplEvidence;
 mod permissions;
 pub use images::TranscriptImageInput;
 pub use images::TranscriptImages;
+mod guardian_tool_descriptions;
+pub use guardian_tool_descriptions::GuardianToolDescriptions;
 mod trusted_skills;
 mod trusted_tool;
 pub use trusted_skills::TrustedSkills;
@@ -157,9 +174,9 @@ pub struct SectionInput<'a> {
     pub transcript: &'a ConversationTranscriptConfig,
     /// Bounded root evidence resolved by the host; empty when not applicable.
     pub root_conversation: &'a [GuardianRootMessage],
-    /// Bounded, role-labeled answers selected from the host-owned context snapshot.
-    pub trusted_user_answers: &'a [String],
-    /// Exact action JSON and reason, already bounded by the requesting host.
+    /// Role-labeled sync answer candidates or already-bounded answers from other consumers.
+    pub trusted_user_answers: &'a [TrustedUserAnswer],
+    /// Exact action JSON; sync composition bounds the reason and descriptions.
     pub planned_action: Option<&'a PlannedAction>,
     /// Sync-only restrictions resolved from the parent execution environment.
     pub permissions: Option<&'a PermissionContext>,
@@ -196,6 +213,17 @@ pub trait SectionHistory: Send + Sync {
     /// Bounded host-owned facts from the same snapshot as the current items.
     fn retained_context(&self) -> Option<&codex_history::RetainedContext> {
         None
+    }
+
+    /// Renders an original complete assistant message without request-size selection.
+    /// Sync preparation applies admission after collection; hosts preserve their fragment boundary.
+    fn render_original_assistant(
+        &self,
+        message: &codex_history::RetainedUserMessage,
+    ) -> Option<GuardianRootMessage> {
+        message
+            .complete
+            .then(|| GuardianRootMessage::Assistant(message.text.clone()))
     }
 
     /// Renders one bounded retained assistant message through the host's
@@ -244,6 +272,8 @@ pub trait SectionContributor: Send + Sync {
 /// A section could not provide the evidence needed for a valid review context.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SectionError {
+    /// One native agent-message ID identifies different authors, recipients or content.
+    ConflictingAgentMessage,
     /// Evidence required by this contributor for the current input is missing.
     MissingRequiredEvidence { section: &'static str },
     /// A section cannot be delivered by the requested consumer.
@@ -255,6 +285,9 @@ pub enum SectionError {
 impl std::fmt::Display for SectionError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ConflictingAgentMessage => {
+                formatter.write_str("conflicting native agent messages share an ID")
+            }
             Self::MissingRequiredEvidence { section } => {
                 write!(formatter, "missing required evidence for section {section}")
             }

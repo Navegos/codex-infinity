@@ -1,3 +1,11 @@
+# Thread memory summary (experimental)
+
+`thread/memory/read` takes `{threadId}` for a loaded thread and returns
+`{summary}`. Start or resume the thread first. The summary uses that thread's
+resolved memory version, including thread-specific configuration overrides.
+It is `null` when memory use is disabled or the selected summary is missing,
+unreadable, or blank. It never falls back to the other memory version.
+
 # Thread list exclusions
 
 `thread/list` accepts `excludedThreadIds`, an optional array of up to 100
@@ -293,6 +301,23 @@ be loaded. This covers turn start/steer, review, compaction, manual queue start,
 updates. Realtime connections use separate routing configuration and are not checked here.
 Interrupt, realtime stop, and goal pause/clear remain available. User and project
 configuration changes alone do not invalidate existing threads.
+
+## Managed network requirements
+
+Use `[network_proxy]` in `requirements.toml` for shared managed network constraints.
+`[experimental_network]` remains a compatibility alias. A single requirements layer cannot
+contain both names; across layers, they merge with normal precedence. The
+`configRequirements/read.network` response exposes the resulting constraints.
+
+In `config.toml`, `[features.network_proxy]` configures the proxy, while
+`[permissions.<profile>.network]` configures a profile's network settings. Managed requirements
+remain separate and override conflicting profile settings. They can start the proxy without
+enabling the feature; feature settings apply only when the feature is enabled.
+
+Policy publishers must continue using `[experimental_network]` until every client and policy
+validation layer supports `[network_proxy]`. Older clients or intermediaries may ignore or strip
+the new spelling, or skip host-local validation. This reader change does not migrate or
+version-gate published policy bundles.
 
 # Amazon Bedrock authentication
 
@@ -602,6 +627,11 @@ User-directed Git, SSH, shell, and other subprocess traffic retain their existin
 execution and sandbox policies.
 
 # Item history anchors
+
+Live notifications and turn history return the same `ThreadItem`. Each item has
+`startedAtMs` and `completedAtMs` beside `type` and `id`. Each timestamp is in
+Unix milliseconds, or `null` when the producer has not recorded it. Clients
+reading older servers may also encounter items that omit these fields.
 
 `thread/items/list` accepts an optional nullable `cursor`: either an opaque string
 from a previous response or an item anchor such as

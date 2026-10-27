@@ -234,6 +234,7 @@ impl GrpcCodeModeHost {
         let request = WaitRequest {
             cell_id: CellId::new(request.cell_id),
             yield_time_ms: request.yield_time_ms,
+            max_output_tokens: None,
         };
         let outcome = tokio::select! {
             biased;
@@ -248,9 +249,7 @@ impl GrpcCodeModeHost {
             }
         };
         let outcome = outcome.with_code_mode_host_duration(received_at.elapsed());
-        let response = conversions::wait_response(outcome)
-            .map_err(|error| Status::internal(error.to_string()))?;
-        Ok(Response::new(response))
+        conversions::wait_response(outcome).map_err(|error| Status::internal(error.to_string()))
     }
 
     async fn cancel_wait_request(
@@ -292,9 +291,7 @@ impl GrpcCodeModeHost {
         let _permit = self.state.request_permit()?;
         let outcome = session.terminate(CellId::new(request.cell_id)).await?;
         let outcome = outcome.with_code_mode_host_duration(received_at.elapsed());
-        let response = conversions::wait_response(outcome)
-            .map_err(|error| Status::internal(error.to_string()))?;
-        Ok(Response::new(response))
+        conversions::wait_response(outcome).map_err(|error| Status::internal(error.to_string()))
     }
 }
 

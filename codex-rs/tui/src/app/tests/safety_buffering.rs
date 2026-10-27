@@ -121,7 +121,7 @@ async fn next_turn_started(
         .await
         .expect("app-server should emit a turn/start event")
         .expect("app-server event stream should remain open");
-        let started_turn_id = if let AppServerEvent::ServerNotification(notification) = &event
+        let started_turn_id = if let AppServerEvent::ServerNotification(notification) = &event.event
             && let ServerNotification::TurnStarted(notification) = notification.as_ref()
             && notification.thread_id == thread_id.to_string()
         {
@@ -129,7 +129,7 @@ async fn next_turn_started(
         } else {
             None
         };
-        app.handle_app_server_event(app_server, event).await;
+        app.handle_backend_event(app_server, event).await;
         drain_active_thread_events(app);
         if let Some(turn_id) = started_turn_id {
             return turn_id;
@@ -151,7 +151,7 @@ async fn wait_for_turn_completed(
         .expect("app-server should emit a turn/completed event")
         .expect("app-server event stream should remain open");
         let completed = matches!(
-            &event,
+            &event.event,
             AppServerEvent::ServerNotification(notification)
                 if matches!(
                     notification.as_ref(),
@@ -159,7 +159,7 @@ async fn wait_for_turn_completed(
                         if notification.thread_id == thread_id.to_string()
                 )
         );
-        app.handle_app_server_event(app_server, event).await;
+        app.handle_backend_event(app_server, event).await;
         drain_active_thread_events(app);
         if completed {
             return;
@@ -314,18 +314,18 @@ stream_max_retries = 0
         )
         .await?
         .expect("app-server remains open");
-        let committed_id = if let AppServerEvent::ServerNotification(notification) = &event
+        let committed_id = if let AppServerEvent::ServerNotification(notification) = &event.event
             && let ServerNotification::ItemCompleted(item) = notification.as_ref()
-            && let ThreadItem::UserMessage {
+            && let ThreadItemPayload::UserMessage {
                 content, client_id, ..
-            } = &item.item
+            } = &item.item.payload
             && ChatWidget::user_message_display_from_inputs(content).message == COMMITTED_STEER
         {
             Some(client_id.clone().expect("receipt echoes the submission ID"))
         } else {
             None
         };
-        app.handle_app_server_event(&app_server, event).await;
+        app.handle_backend_event(&app_server, event).await;
         if let Some(client_id) = committed_id {
             let saved_input = if via_overview {
                 // The overview owns the background thread's saved draft. Its event channel
@@ -436,7 +436,7 @@ async fn drive_until_request_count(
             () = server.wait_for_request_count(expected_request_count) => return,
             event = app_server.next_event() => {
                 let event = event.expect("app-server event stream should remain open");
-                app.handle_app_server_event(app_server, event).await;
+                app.handle_backend_event(app_server, event).await;
                 drain_active_thread_events(app);
             }
             () = &mut timeout => {
@@ -464,9 +464,9 @@ fn user_message_count(thread: &Thread, prompt: &str) -> usize {
     thread
         .turns
         .iter()
-        .flat_map(|turn| &turn.items)
+        .flat_map(Turn::item_payloads)
         .filter_map(|item| match item {
-            ThreadItem::UserMessage { content, .. } => Some(content),
+            ThreadItemPayload::UserMessage { content, .. } => Some(content),
             _ => None,
         })
         .filter(|content| {

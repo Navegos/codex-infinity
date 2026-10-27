@@ -19,6 +19,7 @@ use codex_extension_api::ExtensionRegistryBuilder;
 use codex_extension_api::McpServerContribution;
 use codex_extension_api::McpServerContributionContext;
 use codex_extension_api::McpServerContributor;
+use codex_features::Feature;
 use codex_mcp::CODEX_APPS_MCP_SERVER_NAME;
 use codex_protocol::mcp::McpServerConnectionStatus;
 use codex_protocol::models::PermissionProfile;
@@ -700,6 +701,11 @@ async fn cached_mcp_startup_is_eager_for_root_and_lazy_for_subagents() -> anyhow
         /*sandbox*/ None,
     )
     .await?;
+    // The subagent can reuse the parent's legacy catalog even when discovery is enabled.
+    let mut subagent_config = fixture.config.clone();
+    subagent_config
+        .features
+        .enable(Feature::McpConnectionSharing)?;
     let NewThread {
         thread: second_thread,
         ..
@@ -713,7 +719,7 @@ async fn cached_mcp_startup_is_eager_for_root_and_lazy_for_subagents() -> anyhow
                 agent_nickname: None,
                 agent_role: None,
             })),
-            ..StartThreadOptions::new(fixture.config.clone())
+            ..StartThreadOptions::new(subagent_config)
         })
         .await?;
     second_thread.submit(Op::Interrupt).await?;
@@ -950,8 +956,45 @@ async fn cached_mcp_startup_is_eager_for_root_and_lazy_for_subagents() -> anyhow
             ..StartThreadOptions::new(filtered_config)
         })
         .await?;
+    let filtered_response = mount_sse_once(
+        &responses_server,
+        responses::sse(vec![
+            responses::ev_response_created("filtered"),
+            responses::ev_assistant_message("filtered-message", "done"),
+            responses::ev_completed("filtered"),
+        ]),
+    )
+    .await;
+    filtered_thread
+        .start_or_steer_turn(user_turn("Do not use tools."))
+        .await?;
+    wait_for_event(&filtered_thread, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    assert!(
+        responses::namespace_child_tool(
+            &filtered_response.single_request().body_json(),
+            NAMESPACE,
+            "cwd",
+        )
+        .is_none()
+    );
+    let (mcp_config, _) = filtered_thread
+        .current_mcp_config_and_runtime_context()
+        .await;
+    assert_eq!(
+        filtered_thread
+            .mcp_connection_statuses(&mcp_config)
+            .await
+            .get(SERVER_NAME),
+        Some(&McpServerConnectionStatus::NotStarted),
+    );
+    let result = filtered_thread
+        .call_mcp_tool(SERVER_NAME, "cwd", Some(json!({})), /*meta*/ None)
+        .await?;
+    assert_ne!(result.is_error, Some(true));
     let filtered_pid = wait_for_new_pid(fs.as_ref(), &pid_file, Some(&second_pid)).await?;
-    wait_for_mcp_server(&filtered_thread, SERVER_NAME).await?;
     filtered_thread.shutdown_and_wait().await?;
     fs.remove(
         &barrier_file,

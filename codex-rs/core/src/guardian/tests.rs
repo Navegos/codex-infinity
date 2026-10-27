@@ -62,6 +62,7 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::GuardianAssessmentStatus;
 use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::TurnCompleteEvent;
+use codex_protocol_test_support::ContentItemTestExt;
 use codex_utils_path_uri::LegacyAppPathString;
 use codex_utils_path_uri::PathUri;
 use core_test_support::PathBufExt;
@@ -1185,16 +1186,14 @@ fn collect_guardian_transcript_entries_includes_recent_tool_calls_and_output() {
                 kind: ConversationTranscriptEntryKind::NodeReplToolOutput(
                     "tool read_file result".to_string()
                 ),
-                content: codex_guardian_context::TranscriptContent::Text(
-                    guardian_truncate_text(&oversized_result, token_cap).0
-                ),
+                content: codex_guardian_context::TranscriptContent::Text(oversized_result.clone()),
                 original_bytes: oversized_result.len(),
                 retained_source: None,
             }
         );
         assert_eq!(entries.len(), 4);
         assert_eq!(
-            render_guardian_transcript_entries(&entries),
+            render_guardian_transcript_entries(&entries, token_cap),
             (
                 vec![
                     "[1] user: check the repo".to_string(),
@@ -1828,7 +1827,8 @@ fn build_guardian_transcript_reserves_separate_budget_for_tool_evidence() {
     }));
 
     let entries = collect_guardian_transcript_entries(&items, GUARDIAN_MAX_TOOL_ENTRY_TOKENS);
-    let (transcript, omission) = render_guardian_transcript_entries(&entries);
+    let (transcript, omission) =
+        render_guardian_transcript_entries(&entries, GUARDIAN_MAX_TOOL_ENTRY_TOKENS);
 
     assert!(
         transcript
@@ -1901,7 +1901,8 @@ fn build_guardian_transcript_preserves_recent_tool_context_when_user_history_is_
     ]);
 
     let entries = collect_guardian_transcript_entries(&items, GUARDIAN_MAX_TOOL_ENTRY_TOKENS);
-    let (transcript, omission) = render_guardian_transcript_entries(&entries);
+    let (transcript, omission) =
+        render_guardian_transcript_entries(&entries, GUARDIAN_MAX_TOOL_ENTRY_TOKENS);
 
     assert_eq!(
         transcript[..8],
@@ -4154,6 +4155,7 @@ async fn guardian_review_session_config_isolates_parent_customizations() {
                 guardian_output_contract_prompt(),
             )
             .render()
+            .expect_text()
         )
     );
 }
@@ -4277,6 +4279,7 @@ async fn guardian_review_session_config_uses_requirements_guardian_policy_config
                 guardian_output_contract_prompt(),
             )
             .render()
+            .expect_text()
         )
     );
 }

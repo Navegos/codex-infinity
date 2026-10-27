@@ -158,7 +158,7 @@ impl CodeModeService {
         &self,
         cell_id: CellId,
     ) -> Result<codex_code_mode::WaitOutcome, String> {
-        self.session().await?.terminate(cell_id).await
+        self.session().await?.terminate(cell_id.into()).await
     }
 
     pub(crate) async fn interrupt_active_cells(&self) {
@@ -170,7 +170,7 @@ impl CodeModeService {
                 .active_cell_ids()
                 .into_iter()
                 .map(|cell_id| async move {
-                    if let Err(error) = session.terminate(cell_id.clone()).await {
+                    if let Err(error) = session.terminate(cell_id.clone().into()).await {
                         tracing::warn!(%cell_id, %error, "failed to terminate interrupted code-mode cell");
                     }
                 }),
@@ -345,6 +345,7 @@ fn submit_nested_tool(
     impl std::future::Future<Output = Result<JsonValue, FunctionCallError>> + Send + 'static,
     FunctionCallError,
 > {
+    let dispatch_started = std::time::Instant::now();
     let CodeModeNestedToolCall {
         cell_id,
         runtime_tool_call_id,
@@ -361,6 +362,9 @@ fn submit_nested_tool(
         target: "codex_otel.trace_safe",
         tracing::Level::INFO,
         event.name = "codex.code_mode.nested_tool_dispatched",
+        tool_name = tool_name.name.as_str(),
+        tool_namespace = call_trace::namespace(&tool_name),
+        tool_source = "code_mode",
         conversation.id = %thread_id,
         turn_id = turn_id.as_str(),
         cell.id = telemetry::trace_id(cell_id.as_str()),
@@ -381,6 +385,7 @@ fn submit_nested_tool(
                 &tool_name,
                 &call_id,
                 call_trace::Source::CodeMode,
+                dispatch_started.elapsed(),
             );
             return Err(FunctionCallError::RespondToModel(error));
         }

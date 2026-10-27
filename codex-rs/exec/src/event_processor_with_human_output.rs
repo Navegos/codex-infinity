@@ -6,7 +6,7 @@ use codex_app_server_protocol::CommandExecutionStatus;
 use codex_app_server_protocol::McpToolCallStatus;
 use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::ServerNotification;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TurnStatus;
 use codex_core::config::Config;
@@ -39,6 +39,7 @@ pub(crate) struct EventProcessorWithHumanOutput {
     emit_final_message_on_shutdown: bool,
     last_total_token_usage: Option<ThreadTokenUsage>,
     stream_command_output_directly: bool,
+    last_turn_diff: String,
 }
 
 impl EventProcessorWithHumanOutput {
@@ -66,19 +67,20 @@ impl EventProcessorWithHumanOutput {
             emit_final_message_on_shutdown: false,
             last_total_token_usage: None,
             stream_command_output_directly,
+            last_turn_diff: String::new(),
         }
     }
 
-    fn render_item_started(&self, item: &ThreadItem) {
+    fn render_item_started(&self, item: &ThreadItemPayload) {
         match item {
-            ThreadItem::CommandExecution { command, cwd, .. } => {
+            ThreadItemPayload::CommandExecution { command, cwd, .. } => {
                 eprintln!(
                     "{}\n{} in {cwd}",
                     "exec".style(self.italic).style(self.magenta),
                     command.style(self.bold),
                 );
             }
-            ThreadItem::McpToolCall { server, tool, .. } => {
+            ThreadItemPayload::McpToolCall { server, tool, .. } => {
                 eprintln!(
                     "{} {} {}",
                     "mcp:".style(self.bold),
@@ -86,22 +88,22 @@ impl EventProcessorWithHumanOutput {
                     "started".style(self.dimmed)
                 );
             }
-            ThreadItem::WebSearch(item) => {
+            ThreadItemPayload::WebSearch(item) => {
                 eprintln!("{} {}", "web search:".style(self.bold), item.query);
             }
-            ThreadItem::FileChange { .. } => {
+            ThreadItemPayload::FileChange { .. } => {
                 eprintln!("{}", "apply patch".style(self.bold));
             }
-            ThreadItem::CollabAgentToolCall { tool, .. } => {
+            ThreadItemPayload::CollabAgentToolCall { tool, .. } => {
                 eprintln!("{} {:?}", "collab:".style(self.bold), tool);
             }
             _ => {}
         }
     }
 
-    fn render_item_completed(&mut self, item: ThreadItem) {
+    fn render_item_completed(&mut self, item: ThreadItemPayload) {
         match item {
-            ThreadItem::AgentMessage { text, .. } => {
+            ThreadItemPayload::AgentMessage { text, .. } => {
                 eprintln!(
                     "{}\n{}",
                     "codex".style(self.italic).style(self.magenta),
@@ -110,7 +112,7 @@ impl EventProcessorWithHumanOutput {
                 self.final_message = Some(text);
                 self.final_message_rendered = true;
             }
-            ThreadItem::Reasoning {
+            ThreadItemPayload::Reasoning {
                 summary, content, ..
             } => {
                 if self.show_agent_reasoning
@@ -121,7 +123,7 @@ impl EventProcessorWithHumanOutput {
                     eprintln!("{}", text.style(self.dimmed));
                 }
             }
-            ThreadItem::CommandExecution {
+            ThreadItemPayload::CommandExecution {
                 command: _,
                 aggregated_output,
                 exit_code,
@@ -166,7 +168,7 @@ impl EventProcessorWithHumanOutput {
                     eprintln!("{output}");
                 }
             }
-            ThreadItem::FileChange {
+            ThreadItemPayload::FileChange {
                 changes, status, ..
             } => {
                 let status_text = match status {
@@ -180,7 +182,7 @@ impl EventProcessorWithHumanOutput {
                     eprintln!("{}", change.path.style(self.dimmed));
                 }
             }
-            ThreadItem::McpToolCall {
+            ThreadItemPayload::McpToolCall {
                 server,
                 tool,
                 status,
@@ -202,10 +204,10 @@ impl EventProcessorWithHumanOutput {
                     eprintln!("{}", error.message.style(self.red));
                 }
             }
-            ThreadItem::WebSearch(item) => {
+            ThreadItemPayload::WebSearch(item) => {
                 eprintln!("{} {}", "web search:".style(self.bold), item.query);
             }
-            ThreadItem::ContextCompaction { .. } => {
+            ThreadItemPayload::ContextCompaction { .. } => {
                 eprintln!("{}", "context compacted".style(self.dimmed));
             }
             _ => {}
@@ -290,11 +292,11 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 CodexStatus::Running
             }
             ServerNotification::ItemStarted(notification) => {
-                self.render_item_started(&notification.item);
+                self.render_item_started(&notification.item.payload);
                 CodexStatus::Running
             }
             ServerNotification::ItemCompleted(notification) => {
-                self.render_item_completed(notification.item);
+                self.render_item_completed(notification.item.payload);
                 CodexStatus::Running
             }
             ServerNotification::CommandExecutionOutputDelta(notification) => {
@@ -353,9 +355,12 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 TurnStatus::InProgress => CodexStatus::Running,
             },
             ServerNotification::TurnDiffUpdated(notification) => {
-                if !notification.diff.trim().is_empty() {
+                if notification.diff != self.last_turn_diff && !notification.diff.trim().is_empty()
+                {
                     eprintln!("{}", notification.diff);
                 }
+                // Remember empty updates too, so a restored diff is rendered again.
+                self.last_turn_diff = notification.diff;
                 CodexStatus::Running
             }
             ServerNotification::TurnPlanUpdated(notification) => {
@@ -381,7 +386,10 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 }
                 CodexStatus::Running
             }
-            ServerNotification::TurnStarted(_) => CodexStatus::Running,
+            ServerNotification::TurnStarted(_) => {
+                self.last_turn_diff.clear();
+                CodexStatus::Running
+            }
             _ => CodexStatus::Running,
         }
     }
@@ -503,17 +511,19 @@ fn reasoning_text(
     }
 }
 
-fn final_message_from_turn_items(items: &[ThreadItem]) -> Option<String> {
+fn final_message_from_turn_items(
+    items: &[impl std::borrow::Borrow<ThreadItemPayload>],
+) -> Option<String> {
     items
         .iter()
         .rev()
-        .find_map(|item| match item {
-            ThreadItem::AgentMessage { text, .. } => Some(text.clone()),
+        .find_map(|item| match item.borrow() {
+            ThreadItemPayload::AgentMessage { text, .. } => Some(text.clone()),
             _ => None,
         })
         .or_else(|| {
-            items.iter().rev().find_map(|item| match item {
-                ThreadItem::Plan { text, .. } => Some(text.clone()),
+            items.iter().rev().find_map(|item| match item.borrow() {
+                ThreadItemPayload::Plan { text, .. } => Some(text.clone()),
                 _ => None,
             })
         })

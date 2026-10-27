@@ -16,7 +16,6 @@ pub(crate) use input_budget::should_compact as should_compact_guardian_input;
 pub(crate) use permissions::for_tool as tool_permission_context;
 mod request_budget;
 pub(crate) use request_budget::ExhaustedReviewBudget;
-pub(crate) use request_budget::observe as observe_guardian_request;
 pub(crate) use request_budget::prepare_prompt as prepare_guardian_prompt;
 mod review;
 mod review_session;
@@ -225,3 +224,7 @@ use review_session::build_guardian_review_session_config as build_guardian_revie
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "decision_timing_tests.rs"]
+mod decision_timing_tests;

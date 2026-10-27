@@ -47,6 +47,7 @@ use crate::render::renderable::FlexRenderable;
 use crate::render::renderable::Renderable;
 use crate::render::renderable::RenderableItem;
 use crate::terminal_palette::effective_stdout_color_level;
+use crate::terminal_program_status::ProgramStatusKind;
 use crate::tui::FrameRequester;
 pub(crate) use bottom_pane_view::BottomPaneView;
 pub(crate) use bottom_pane_view::ViewCompletion;
@@ -153,13 +154,17 @@ mod file_search_popup;
 mod footer;
 mod list_selection_view;
 mod memories_settings_view;
+mod mention_usage;
+pub(crate) use mention_usage::MentionUsage;
 mod mentions_v2;
 mod picker_presets;
 mod picker_rows;
 mod picker_style;
+mod shortcut_hud;
 mod shortcut_overlay;
 pub(crate) use picker_style::active_tab_style;
 pub(crate) use picker_style::selection_style;
+pub(crate) use shortcut_hud::ShortcutHud;
 pub(crate) mod prompt_args;
 mod selection_picker_layout;
 mod skill_popup;
@@ -177,6 +182,7 @@ pub(crate) use list_selection_view::SearchMode;
 pub(crate) use list_selection_view::SelectionDescriptionLayout;
 pub(crate) use list_selection_view::SelectionRowDisplay;
 pub(crate) use list_selection_view::SelectionToggle;
+pub(crate) use list_selection_view::SelectionToggleState;
 pub(crate) use list_selection_view::SelectionViewParams;
 pub(crate) use list_selection_view::SideContentWidth;
 pub(crate) use list_selection_view::popup_content_width;
@@ -349,6 +355,18 @@ pub(crate) struct BottomPaneParams {
 }
 
 impl BottomPane {
+    pub(crate) fn set_mention_usage_home(
+        &mut self,
+        codex_home: &std::path::Path,
+        persistence: codex_config::types::HistoryPersistence,
+    ) {
+        self.composer.mention_usage = MentionUsage::load(codex_home, persistence);
+    }
+
+    pub(crate) fn mention_usage_mut(&mut self) -> &mut MentionUsage {
+        &mut self.composer.mention_usage
+    }
+
     pub fn new(params: BottomPaneParams) -> Self {
         Self::new_with_composer_config(params, ChatComposerConfig::default())
     }
@@ -427,6 +445,15 @@ impl BottomPane {
         self.request_redraw();
     }
 
+    pub(crate) fn set_motion_preferences(&mut self, tui: &codex_config::types::Tui) {
+        self.animations_enabled = tui.animations;
+        self.effects = tui.effects;
+        if let Some(status) = self.status.as_mut() {
+            status.set_motion_preferences(tui);
+        }
+        self.request_redraw();
+    }
+
     /// Mirrors the effective reasoning effort into the composer so its next
     /// visible frame can play a one-shot Max/Ultra effect.
     pub(crate) fn set_active_reasoning_effort(&mut self, effort: Option<&ReasoningEffort>) {
@@ -460,9 +487,13 @@ impl BottomPane {
         self.request_redraw();
     }
 
-    pub(crate) fn set_agents_navigation_enabled(&mut self, enabled: bool) {
-        self.composer.set_agents_navigation_enabled(enabled);
+    pub(crate) fn set_command_center_enabled(&mut self, enabled: bool) {
+        self.composer.command_center_enabled = enabled;
         self.request_redraw();
+    }
+
+    pub(crate) fn command_center_enabled(&self) -> bool {
+        self.composer.command_center_enabled
     }
 
     pub(crate) fn agents_navigation_key_available(&self) -> bool {
@@ -1222,6 +1253,11 @@ impl BottomPane {
         self.composer.current_text_with_pending()
     }
 
+    /// Include buffered typing before a shortcut takes ownership of composer input.
+    pub(crate) fn flush_pending_composer_input(&mut self) {
+        self.composer.flush_pending_input();
+    }
+
     /// Returns whether the composer currently accepts interactive draft edits.
     pub(crate) fn composer_input_enabled(&self) -> bool {
         self.composer.input_enabled()
@@ -1618,6 +1654,30 @@ impl BottomPane {
             .and_then(|view| view.selected_index())
     }
 
+    pub(crate) fn selection_toggle_states_for_active_view(
+        &self,
+        view_id: &'static str,
+    ) -> Option<Vec<Option<SelectionToggleState>>> {
+        self.view_stack
+            .last()
+            .filter(|view| view.view_id() == Some(view_id))
+            .map(|view| view.selection_toggle_states())
+    }
+
+    pub(crate) fn complete_selection_toggle_for_active_view(
+        &mut self,
+        view_id: &'static str,
+        index: usize,
+    ) {
+        if let Some(view) = self
+            .view_stack
+            .last_mut()
+            .filter(|view| view.view_id() == Some(view_id))
+        {
+            view.complete_selection_toggle(index);
+        }
+    }
+
     pub(crate) fn selected_index_for_present_view(&self, view_id: &'static str) -> Option<usize> {
         self.view_stack
             .iter()
@@ -1790,6 +1850,29 @@ impl BottomPane {
                 .is_some_and(bottom_pane_view::BottomPaneView::terminal_title_requires_action)
     }
 
+    /// Include requests behind a picker or delayed while the user is typing.
+    /// Async questions only block once the agent is no longer running.
+    pub(crate) fn program_status_blocked_kind(&self) -> Option<ProgramStatusKind> {
+        self.view_stack
+            .iter()
+            .rev()
+            .filter(|view| !view.is_complete())
+            .find_map(|view| view.program_status_blocked_kind())
+            .or_else(|| {
+                self.delayed_approval_requests
+                    .front()
+                    .map(|delayed| delayed.request.program_status_blocked_kind())
+            })
+            .or_else(|| {
+                (!self.is_task_running()
+                    && self
+                        .questions
+                        .as_ref()
+                        .is_some_and(|questions| questions.unanswered_count() > 0))
+                .then_some(ProgramStatusKind::Question)
+            })
+    }
+
     pub(crate) fn has_centered_view(&self) -> bool {
         self.active_view()
             .is_some_and(|view| view.presentation() == ViewPresentation::Centered)
@@ -1858,6 +1941,10 @@ impl BottomPane {
         self.composer.end_mouse_drag();
     }
 
+    pub(crate) fn cancel_composer_primary(&mut self) {
+        self.composer.cancel_primary();
+    }
+
     pub(crate) fn finish_composer_copy(
         &mut self,
         completion: &(u64, crate::clipboard_copy::worker::CopyResult),
@@ -1876,6 +1963,25 @@ impl BottomPane {
             return None;
         }
         self.composer.copy_selection(event, copy)
+    }
+
+    pub(crate) fn copy_composer_selection_on_release(
+        &mut self,
+        event: crossterm::event::MouseEvent,
+        selection_copy: crate::tui::SelectionCopy,
+        copy: impl FnOnce(
+            &str,
+            crate::tui::SelectionCopy,
+        ) -> (
+            crate::clipboard_copy::worker::CopyResult,
+            Option<std::sync::Arc<()>>,
+        ),
+    ) -> Option<(usize, Option<crate::clipboard_copy::worker::CopyResult>)> {
+        if self.has_active_view() || self.questions.as_ref().is_some_and(|q| q.expanded) {
+            return None;
+        }
+        self.composer
+            .copy_selection_on_release(event, selection_copy, copy)
     }
 
     pub(crate) fn clipboard_paste_target(
@@ -2242,6 +2348,10 @@ impl BottomPane {
         if updated {
             self.request_redraw();
         }
+    }
+
+    pub(crate) fn record_local_user_message_history(&mut self, entry: HistoryEntry) {
+        self.composer.record_local_user_message_history(entry);
     }
 
     pub(crate) fn record_replayed_user_message_history(&mut self, entry: HistoryEntry) {
@@ -2967,7 +3077,12 @@ mod tests {
             skills: Some(Vec::new()),
         });
         pane.push_approval_request(exec_request(), &features);
+        assert_eq!(
+            pane.program_status_blocked_kind(),
+            Some(ProgramStatusKind::Permission)
+        );
         assert_eq!(CancellationEvent::Handled, pane.on_ctrl_c());
+        assert_eq!(pane.program_status_blocked_kind(), None);
         assert!(!pane.quit_shortcut_hint_visible());
         assert_eq!(CancellationEvent::NotHandled, pane.on_ctrl_c());
     }
@@ -3210,6 +3325,10 @@ mod tests {
         let request = exec_request();
         let thread_id = request.thread_id();
         pane.push_approval_request(request, &features);
+        assert_eq!(
+            pane.program_status_blocked_kind(),
+            Some(ProgramStatusKind::Permission)
+        );
 
         assert!(
             pane.dismiss_app_server_request(&ResolvedAppServerRequest::ExecApproval {
@@ -3218,6 +3337,7 @@ mod tests {
             })
         );
         assert!(pane.delayed_approval_requests.is_empty());
+        assert_eq!(pane.program_status_blocked_kind(), None);
 
         pane.pre_draw_tick_at(now + APPROVAL_PROMPT_TYPING_IDLE_DELAY);
         assert!(pane.view_stack.is_empty());

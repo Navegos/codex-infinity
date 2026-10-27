@@ -166,6 +166,7 @@ pub struct ConfigRequirements {
     pub cli_auth_credentials_store: Option<Sourced<AuthCredentialsStoreMode>>,
     pub chatgpt_base_url: Option<Sourced<String>>,
     pub sqlite_home: Option<Sourced<AbsolutePathBuf>>,
+    pub unsafe_enforce_sqlite_journal_mode: Option<Sourced<bool>>,
     pub log_dir: Option<Sourced<AbsolutePathBuf>>,
     pub model_catalog_json: Option<Sourced<AbsolutePathBuf>>,
     pub model_provider: Option<Sourced<String>>,
@@ -211,6 +212,7 @@ impl Default for ConfigRequirements {
             cli_auth_credentials_store: None,
             chatgpt_base_url: None,
             sqlite_home: None,
+            unsafe_enforce_sqlite_journal_mode: None,
             log_dir: None,
             model_catalog_json: None,
             model_provider: None,
@@ -432,6 +434,9 @@ pub struct NetworkRequirementsToml {
     pub dangerously_allow_non_loopback_proxy: Option<bool>,
     pub dangerously_allow_all_unix_sockets: Option<bool>,
     pub domains: Option<NetworkDomainPermissionsToml>,
+    /// Host patterns routed to the existing network approval flow before ordinary allow rules.
+    /// Explicit denials take precedence; approval caching, hooks, and reviewer routing still apply.
+    pub review_domains: Option<Vec<String>>,
     /// When true, only managed `allowed_domains` are respected while managed
     /// network enforcement is active. User allowlist entries are ignored.
     pub managed_allowed_domains_only: Option<bool>,
@@ -471,6 +476,7 @@ struct RawNetworkRequirementsToml {
     dangerously_allow_non_loopback_proxy: Option<bool>,
     dangerously_allow_all_unix_sockets: Option<bool>,
     domains: Option<NetworkDomainPermissionsToml>,
+    review_domains: Option<Vec<String>>,
     #[serde(default)]
     allowed_domains: Option<Vec<String>>,
     /// When true, only managed `allowed_domains` are respected while managed
@@ -499,6 +505,7 @@ impl<'de> Deserialize<'de> for NetworkRequirementsToml {
             dangerously_allow_non_loopback_proxy,
             dangerously_allow_all_unix_sockets,
             domains,
+            review_domains,
             allowed_domains,
             managed_allowed_domains_only,
             denied_domains,
@@ -510,13 +517,13 @@ impl<'de> Deserialize<'de> for NetworkRequirementsToml {
 
         if domains.is_some() && (allowed_domains.is_some() || denied_domains.is_some()) {
             return Err(D::Error::custom(
-                "`experimental_network.domains` cannot be combined with legacy `allowed_domains` or `denied_domains`",
+                "`domains` cannot be combined with legacy `allowed_domains` or `denied_domains` in managed network requirements",
             ));
         }
 
         if unix_sockets.is_some() && allow_unix_sockets.is_some() {
             return Err(D::Error::custom(
-                "`experimental_network.unix_sockets` cannot be combined with legacy `allow_unix_sockets`",
+                "`unix_sockets` cannot be combined with legacy `allow_unix_sockets` in managed network requirements",
             ));
         }
 
@@ -529,6 +536,7 @@ impl<'de> Deserialize<'de> for NetworkRequirementsToml {
             dangerously_allow_all_unix_sockets,
             domains: domains
                 .or_else(|| legacy_domain_permissions_from_lists(allowed_domains, denied_domains)),
+            review_domains,
             managed_allowed_domains_only,
             unix_sockets: unix_sockets
                 .or_else(|| legacy_unix_socket_permissions_from_list(allow_unix_sockets)),
@@ -580,6 +588,7 @@ pub struct NetworkConstraints {
     pub dangerously_allow_non_loopback_proxy: Option<bool>,
     pub dangerously_allow_all_unix_sockets: Option<bool>,
     pub domains: Option<NetworkDomainPermissionsToml>,
+    pub review_domains: Option<Vec<String>>,
     /// When true, only managed `allowed_domains` are respected while managed
     /// network enforcement is active. User allowlist entries are ignored.
     pub managed_allowed_domains_only: Option<bool>,
@@ -608,6 +617,7 @@ impl From<NetworkRequirementsToml> for NetworkConstraints {
             dangerously_allow_non_loopback_proxy,
             dangerously_allow_all_unix_sockets,
             domains,
+            review_domains,
             managed_allowed_domains_only,
             unix_sockets,
             allow_local_binding,
@@ -621,6 +631,7 @@ impl From<NetworkRequirementsToml> for NetworkConstraints {
             dangerously_allow_non_loopback_proxy,
             dangerously_allow_all_unix_sockets,
             domains,
+            review_domains,
             managed_allowed_domains_only,
             unix_sockets,
             allow_local_binding,
@@ -1033,11 +1044,17 @@ pub(crate) fn merge_app_requirements_descending(
 /// Base config deserialized from system `requirements.toml` or MDM.
 #[derive(Deserialize, Debug, Clone, Default, PartialEq)]
 pub struct ConfigRequirementsToml {
+    /// Required customer-hosted configuration server. Only local managed requirements may configure it.
+    pub config_server: Option<crate::ConfigServer>,
     pub allowed_login_methods: Option<Vec<ForcedLoginMethod>>,
     pub allowed_chatgpt_workspaces: Option<Vec<String>>,
     pub cli_auth_credentials_store: Option<AuthCredentialsStoreMode>,
     pub chatgpt_base_url: Option<String>,
     pub sqlite_home: Option<AbsolutePathBuf>,
+    /// Require migration of existing WAL databases on NFS before opening writable pools.
+    /// Unsafe: other clients on all hosts must remain stopped during replacement.
+    /// Allows accessible shared files; mode bits are preserved, but ownership and ACLs are not.
+    pub unsafe_enforce_sqlite_journal_mode: Option<bool>,
     pub log_dir: Option<AbsolutePathBuf>,
     pub model_catalog_json: Option<AbsolutePathBuf>,
     /// Exact provider selection, overriding local and session configuration.
@@ -1071,7 +1088,8 @@ pub struct ConfigRequirementsToml {
     pub apps: Option<AppsRequirementsToml>,
     pub rules: Option<RequirementsExecPolicyToml>,
     pub enforce_residency: Option<ResidencyRequirement>,
-    #[serde(rename = "experimental_network")]
+    /// Shared managed network constraints; `experimental_network` remains an alias.
+    #[serde(rename = "network_proxy", alias = "experimental_network")]
     pub network: Option<NetworkRequirementsToml>,
     pub application: Option<ApplicationRequirementsToml>,
     pub permissions: Option<PermissionsRequirementsToml>,
@@ -1144,11 +1162,13 @@ impl<T> std::ops::Deref for Sourced<T> {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ConfigRequirementsWithSources {
+    pub config_server: Option<Sourced<crate::ConfigServer>>,
     pub allowed_login_methods: Option<Sourced<Vec<ForcedLoginMethod>>>,
     pub allowed_chatgpt_workspaces: Option<Sourced<Vec<String>>>,
     pub cli_auth_credentials_store: Option<Sourced<AuthCredentialsStoreMode>>,
     pub chatgpt_base_url: Option<Sourced<String>>,
     pub sqlite_home: Option<Sourced<AbsolutePathBuf>>,
+    pub unsafe_enforce_sqlite_journal_mode: Option<Sourced<bool>>,
     pub log_dir: Option<Sourced<AbsolutePathBuf>>,
     pub model_catalog_json: Option<Sourced<AbsolutePathBuf>>,
     pub model_provider: Option<Sourced<String>>,
@@ -1207,11 +1227,13 @@ impl ConfigRequirementsWithSources {
         // Destructure without `..` so adding fields to `ConfigRequirementsToml`
         // forces this merge logic to be updated.
         let ConfigRequirementsToml {
+            config_server: _,
             allowed_login_methods: _,
             allowed_chatgpt_workspaces: _,
             cli_auth_credentials_store: _,
             chatgpt_base_url: _,
             sqlite_home: _,
+            unsafe_enforce_sqlite_journal_mode: _,
             log_dir: _,
             model_catalog_json: _,
             model_provider: _,
@@ -1272,11 +1294,13 @@ impl ConfigRequirementsWithSources {
             other,
             source,
             {
+                config_server,
                 allowed_login_methods,
                 allowed_chatgpt_workspaces,
                 cli_auth_credentials_store,
                 chatgpt_base_url,
                 sqlite_home,
+                unsafe_enforce_sqlite_journal_mode,
                 log_dir,
                 model_catalog_json,
                 model_provider,
@@ -1358,11 +1382,13 @@ impl ConfigRequirementsWithSources {
 
     pub fn into_toml(self) -> ConfigRequirementsToml {
         let ConfigRequirementsWithSources {
+            config_server,
             allowed_login_methods,
             allowed_chatgpt_workspaces,
             cli_auth_credentials_store,
             chatgpt_base_url,
             sqlite_home,
+            unsafe_enforce_sqlite_journal_mode,
             log_dir,
             model_catalog_json,
             model_provider,
@@ -1402,11 +1428,14 @@ impl ConfigRequirementsWithSources {
             guardian_extra_policy,
         } = self;
         ConfigRequirementsToml {
+            config_server: config_server.map(|sourced| sourced.value),
             allowed_login_methods: allowed_login_methods.map(|sourced| sourced.value),
             allowed_chatgpt_workspaces: allowed_chatgpt_workspaces.map(|sourced| sourced.value),
             cli_auth_credentials_store: cli_auth_credentials_store.map(|sourced| sourced.value),
             chatgpt_base_url: chatgpt_base_url.map(|sourced| sourced.value),
             sqlite_home: sqlite_home.map(|sourced| sourced.value),
+            unsafe_enforce_sqlite_journal_mode: unsafe_enforce_sqlite_journal_mode
+                .map(|sourced| sourced.value),
             log_dir: log_dir.map(|sourced| sourced.value),
             model_catalog_json: model_catalog_json.map(|sourced| sourced.value),
             model_provider: model_provider.map(|sourced| sourced.value),
@@ -1492,6 +1521,11 @@ impl From<SandboxMode> for SandboxModeRequirement {
 }
 
 impl ConfigRequirementsToml {
+    /// Whether local administration requires a remotely delivered managed bundle.
+    pub fn requires_remote_config(&self) -> bool {
+        self.config_server.is_some()
+    }
+
     pub fn apply_remote_sandbox_config(&mut self, hostname: Option<&str>) {
         let Some(remote_sandbox_config) = self.remote_sandbox_config.as_ref() else {
             return;
@@ -1509,11 +1543,13 @@ impl ConfigRequirementsToml {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.allowed_login_methods.is_none()
+        self.config_server.is_none()
+            && self.allowed_login_methods.is_none()
             && self.allowed_chatgpt_workspaces.is_none()
             && self.cli_auth_credentials_store.is_none()
             && self.chatgpt_base_url.is_none()
             && self.sqlite_home.is_none()
+            && self.unsafe_enforce_sqlite_journal_mode.is_none()
             && self.log_dir.is_none()
             && self.model_catalog_json.is_none()
             && self.model_provider.is_none()
@@ -1575,10 +1611,13 @@ impl ConfigRequirementsToml {
             && self.rules.is_none()
             && self.enforce_residency.is_none()
             && self.network.is_none()
-            && self
-                .application
-                .as_ref()
-                .is_none_or(|application| application.network.is_none())
+            && self.application.as_ref().is_none_or(|application| {
+                application.network.is_none()
+                    && application
+                        .storage
+                        .as_deref()
+                        .is_none_or(crate::ApplicationStorageRequirementsToml::is_empty)
+            })
             && self.permissions.is_none()
             && self.auto_review.as_ref().is_none_or(|auto_review| {
                 auto_review.ignore_rules.as_ref().is_none_or(Vec::is_empty)
@@ -1618,6 +1657,13 @@ impl ConfigRequirementsToml {
         apply_exact!(chatgpt_base_url);
         apply_exact!(sqlite_home);
         apply_exact!(log_dir);
+        if let Some(storage) = self
+            .application
+            .as_ref()
+            .and_then(|application| application.storage.as_ref())
+        {
+            storage.apply_to_config(config);
+        }
         apply_exact!(model_catalog_json);
         apply_exact!(model_provider);
         if let Some(providers) = &self.model_providers {
@@ -1641,6 +1687,14 @@ impl ConfigRequirementsToml {
 
     /// Returns the exact managed field affected by editing `segments`.
     pub fn exact_requirement_for_config_path(&self, segments: &[String]) -> Option<&'static str> {
+        if let Some(field) = self
+            .application
+            .as_ref()
+            .and_then(|application| application.storage.as_ref())
+            .and_then(|storage| storage.exact_requirement_for_config_path(segments))
+        {
+            return Some(field);
+        }
         if self.model_providers.as_ref().is_some_and(|providers| {
             providers
                 .keys()
@@ -1734,11 +1788,13 @@ impl TryFrom<ConfigRequirementsWithSources> for ConfigRequirements {
         // defaults also remain there because they are initialization values;
         // model-specific auto-review requirements are runtime constraints.
         let ConfigRequirementsWithSources {
+            config_server: _,
             allowed_login_methods,
             allowed_chatgpt_workspaces,
             cli_auth_credentials_store,
             chatgpt_base_url,
             sqlite_home,
+            unsafe_enforce_sqlite_journal_mode,
             log_dir,
             model_catalog_json,
             model_provider,
@@ -2129,6 +2185,7 @@ impl TryFrom<ConfigRequirementsWithSources> for ConfigRequirements {
             cli_auth_credentials_store,
             chatgpt_base_url,
             sqlite_home,
+            unsafe_enforce_sqlite_journal_mode,
             log_dir,
             model_catalog_json,
             model_provider,
@@ -2195,7 +2252,6 @@ mod tests {
     use crate::ComputerUseMacosRequirementsToml;
     use crate::ComputerUseWindowsExeRequirementToml;
     use crate::ComputerUseWindowsRequirementsToml;
-    use crate::HookEventsToml;
     use crate::McpServerCommandMatcher;
     use crate::McpServerIdentity;
     use crate::McpServerValueMatcher;
@@ -2288,11 +2344,13 @@ mod tests {
 
     fn with_unknown_source(toml: ConfigRequirementsToml) -> ConfigRequirementsWithSources {
         let ConfigRequirementsToml {
+            config_server,
             allowed_login_methods,
             allowed_chatgpt_workspaces,
             cli_auth_credentials_store,
             chatgpt_base_url,
             sqlite_home,
+            unsafe_enforce_sqlite_journal_mode,
             log_dir,
             model_catalog_json,
             model_provider,
@@ -2333,6 +2391,8 @@ mod tests {
             guardian_extra_policy,
         } = toml;
         ConfigRequirementsWithSources {
+            config_server: config_server
+                .map(|value| Sourced::new(value, RequirementSource::Unknown)),
             allowed_login_methods: allowed_login_methods
                 .map(|value| Sourced::new(value, RequirementSource::Unknown)),
             allowed_chatgpt_workspaces: allowed_chatgpt_workspaces
@@ -2342,6 +2402,8 @@ mod tests {
             chatgpt_base_url: chatgpt_base_url
                 .map(|value| Sourced::new(value, RequirementSource::Unknown)),
             sqlite_home: sqlite_home.map(|value| Sourced::new(value, RequirementSource::Unknown)),
+            unsafe_enforce_sqlite_journal_mode: unsafe_enforce_sqlite_journal_mode
+                .map(|value| Sourced::new(value, RequirementSource::Unknown)),
             log_dir: log_dir.map(|value| Sourced::new(value, RequirementSource::Unknown)),
             model_catalog_json: model_catalog_json
                 .map(|value| Sourced::new(value, RequirementSource::Unknown)),
@@ -2867,11 +2929,13 @@ mod tests {
         // Intentionally constructed without `..Default::default()` so adding a new field to
         // `ConfigRequirementsToml` forces this test to be updated.
         let other = ConfigRequirementsToml {
+            config_server: None,
             allowed_login_methods: Some(vec![ForcedLoginMethod::Chatgpt]),
             allowed_chatgpt_workspaces: Some(vec!["managed-workspace".to_string()]),
             cli_auth_credentials_store: Some(AuthCredentialsStoreMode::Keyring),
             chatgpt_base_url: Some("https://managed.example/backend-api/".to_string()),
             sqlite_home: Some(sqlite_home.clone()),
+            unsafe_enforce_sqlite_journal_mode: Some(true),
             log_dir: Some(log_dir.clone()),
             model_catalog_json: Some(model_catalog_json.clone()),
             model_provider: Some("gateway".to_string()),
@@ -2917,6 +2981,7 @@ mod tests {
         assert_eq!(
             target,
             ConfigRequirementsWithSources {
+                config_server: None,
                 allowed_login_methods: Some(Sourced::new(
                     vec![ForcedLoginMethod::Chatgpt],
                     source.clone(),
@@ -2934,6 +2999,10 @@ mod tests {
                     source.clone(),
                 )),
                 sqlite_home: Some(Sourced::new(sqlite_home, source.clone())),
+                unsafe_enforce_sqlite_journal_mode: Some(Sourced::new(
+                    /*value*/ true,
+                    source.clone()
+                )),
                 log_dir: Some(Sourced::new(log_dir, source.clone())),
                 model_catalog_json: Some(Sourced::new(model_catalog_json, source.clone())),
                 model_provider: Some(Sourced::new("gateway".to_string(), source.clone())),
@@ -3064,6 +3133,7 @@ mod tests {
         let mut populated_target = ConfigRequirementsWithSources::default();
         let populated_requirements: ConfigRequirementsToml = from_str(
             r#"
+                unsafe_enforce_sqlite_journal_mode = true
                 allowed_approval_policies = ["never"]
                 guardian_extra_policy = "Use the managed extra policy."
             "#,
@@ -3072,6 +3142,7 @@ mod tests {
 
         let source: ConfigRequirementsToml = from_str(
             r#"
+                unsafe_enforce_sqlite_journal_mode = false
                 allowed_approval_policies = ["on-request"]
                 guardian_extra_policy = "Use the lower-priority extra policy."
             "#,
@@ -3085,6 +3156,10 @@ mod tests {
         assert_eq!(
             populated_target,
             ConfigRequirementsWithSources {
+                unsafe_enforce_sqlite_journal_mode: Some(Sourced::new(
+                    /*value*/ true,
+                    existing_source.clone()
+                )),
                 allowed_approval_policies: Some(Sourced::new(
                     vec![AskForApproval::Never],
                     existing_source.clone(),
@@ -4406,7 +4481,7 @@ command = "python3 /enterprise/hooks/pre.py"
             .set(ManagedHooksRequirementsToml {
                 managed_dir: Some(std::path::PathBuf::from("/other/hooks")),
                 windows_managed_dir: None,
-                hooks: HookEventsToml::default(),
+                hooks: Default::default(),
             })
             .expect_err("managed hooks should reject drift");
 
@@ -4418,6 +4493,38 @@ command = "python3 /enterprise/hooks/pre.py"
                 ..
             }
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn network_proxy_and_experimental_network_are_equivalent_aliases() -> Result<()> {
+        let parse = |table: &str| {
+            from_str::<ConfigRequirementsToml>(&format!(
+                "[{table}]\nenabled = true\nmanaged_allowed_domains_only = true\n\
+                 [{table}.domains]\n\"api.example.com\" = \"allow\""
+            ))
+        };
+        assert_eq!(parse("network_proxy")?, parse("experimental_network")?);
+
+        for values in ["", "enabled = true"] {
+            let both = format!("[network_proxy]\n{values}\n[experimental_network]\n{values}");
+            assert!(from_str::<ConfigRequirementsToml>(&both).is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn network_proxy_does_not_reserve_the_managed_network_profile() -> Result<()> {
+        let requirements: ConfigRequirementsToml = from_str(
+            "[network_proxy]\nenabled = true\n[permissions.network]\nextends = ':workspace'",
+        )?;
+        assert!(
+            requirements
+                .permissions
+                .expect("managed permissions")
+                .profiles
+                .contains_key("network")
+        );
         Ok(())
     }
 
@@ -4531,6 +4638,7 @@ command = "python3 /enterprise/hooks/pre.py"
             allow_upstream_proxy = false
             dangerously_allow_all_unix_sockets = true
             allowed_domains = ["api.example.com", "*.openai.com"]
+            review_domains = ["review.example.com", "*.review.example.com"]
             managed_allowed_domains_only = true
             denied_domains = ["blocked.example.com"]
             allow_unix_sockets = ["/tmp/example.sock"]
@@ -4587,6 +4695,14 @@ command = "python3 /enterprise/hooks/pre.py"
         );
         assert_eq!(sourced_network.value.allow_local_binding, Some(false));
 
+        assert_eq!(
+            sourced_network.value.review_domains,
+            Some(vec![
+                "review.example.com".to_string(),
+                "*.review.example.com".to_string()
+            ])
+        );
+
         Ok(())
     }
 
@@ -4604,8 +4720,7 @@ command = "python3 /enterprise/hooks/pre.py"
         .expect_err("mixed network domain shapes should fail");
 
         assert!(
-            err.to_string()
-                .contains("`experimental_network.domains` cannot be combined"),
+            err.to_string().contains("`domains` cannot be combined"),
             "unexpected error: {err:#}"
         );
 
@@ -4622,7 +4737,7 @@ command = "python3 /enterprise/hooks/pre.py"
 
         assert!(
             err.to_string()
-                .contains("`experimental_network.unix_sockets` cannot be combined"),
+                .contains("`unix_sockets` cannot be combined"),
             "unexpected error: {err:#}"
         );
     }

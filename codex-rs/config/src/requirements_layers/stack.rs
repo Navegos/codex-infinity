@@ -152,6 +152,12 @@ impl RequirementsLayerStack {
 
         let mut merged_toml = TomlValue::Table(toml::map::Map::new());
         for layer in &layers {
+            // An endpoint and its credentials must come from the same requirements layer.
+            if layer.regular_toml.get("config_server").is_some()
+                && let Some(table) = merged_toml.as_table_mut()
+            {
+                table.remove("config_server");
+            }
             merge_toml_values(&mut merged_toml, &layer.regular_toml);
         }
 
@@ -211,11 +217,13 @@ fn populate_merged_regular_fields_with_sources(
     // Destructure without `..` so every new requirements field must choose
     // whether it belongs in the regular TOML merge path or in a special merger.
     let ConfigRequirementsToml {
+        config_server,
         allowed_login_methods,
         allowed_chatgpt_workspaces,
         cli_auth_credentials_store,
         chatgpt_base_url,
         sqlite_home,
+        unsafe_enforce_sqlite_journal_mode,
         log_dir,
         model_catalog_json,
         model_provider,
@@ -256,11 +264,16 @@ fn populate_merged_regular_fields_with_sources(
         guardian_extra_policy,
     } = requirements;
 
+    set_sourced!(config_server, &["config_server"]);
     set_sourced!(allowed_login_methods, &["allowed_login_methods"]);
     set_sourced!(allowed_chatgpt_workspaces, &["allowed_chatgpt_workspaces"]);
     set_sourced!(cli_auth_credentials_store, &["cli_auth_credentials_store"]);
     set_sourced!(chatgpt_base_url, &["chatgpt_base_url"]);
     set_sourced!(sqlite_home, &["sqlite_home"]);
+    set_sourced!(
+        unsafe_enforce_sqlite_journal_mode,
+        &["unsafe_enforce_sqlite_journal_mode"]
+    );
     set_sourced!(log_dir, &["log_dir"]);
     set_sourced!(model_catalog_json, &["model_catalog_json"]);
     set_sourced!(model_provider, &["model_provider"]);
@@ -301,7 +314,7 @@ fn populate_merged_regular_fields_with_sources(
     set_sourced!(marketplaces, &["marketplaces"]);
     set_sourced!(apps, &["apps"]);
     set_sourced!(enforce_residency, &["enforce_residency"]);
-    set_sourced!(network, &["experimental_network"]);
+    set_sourced!(network, &["network_proxy"]);
     set_sourced!(application, &["application"]);
     set_sourced!(permissions, &["permissions"]);
     set_sourced!(models, &["models"]);
@@ -343,7 +356,8 @@ fn source_for_top_level_keys(
     };
     let winning_source = (*winning_source).clone();
 
-    if !winning_value.is_table() {
+    // The config_server block is replaced as a whole, including its source attribution.
+    if keys == ["config_server"] || !winning_value.is_table() {
         return winning_source;
     }
 

@@ -5,6 +5,7 @@ use codex_exec_server::LOCAL_ENVIRONMENT_ID;
 use codex_exec_server::MAX_SELECTED_CAPABILITY_ROOTS;
 use codex_exec_server::SelectedCapabilityRootsStatus;
 use codex_execpolicy::Policy;
+use codex_features::Feature;
 use codex_protocol::capabilities::CapabilityRootLocation;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
@@ -16,6 +17,7 @@ use codex_protocol::sandbox::SandboxType;
 
 use crate::config::ConstraintError;
 use crate::config::ConstraintResult;
+use crate::config::ManagedFeatures;
 use crate::config::NetworkProxySpec;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::session::session::Session;
@@ -25,6 +27,7 @@ use codex_model_provider::SharedModelProvider;
 use codex_model_provider::create_model_provider;
 
 /// Defaults for environments that inherit their configuration from the running turn.
+#[derive(Clone)]
 pub(crate) struct ThreadEnvironmentDefaults {
     pub(crate) common: EnvironmentConfig,
     // Chosen once when the session starts; it does not apply to remote environments.
@@ -51,6 +54,7 @@ impl ThreadEnvironmentDefaults {
 
 pub(super) fn validate_environment_configs(
     selections: &[TurnEnvironmentSelection],
+    features: &ManagedFeatures,
 ) -> ConstraintResult<()> {
     for selection in selections {
         match &selection.config {
@@ -58,7 +62,7 @@ pub(super) fn validate_environment_configs(
             | EnvironmentConfigState::Pending
             | EnvironmentConfigState::Failed(_) => {}
             EnvironmentConfigState::Ready(config) => {
-                validate_environment_config(selection, config).map_err(|error| {
+                validate_environment_config(selection, config, features).map_err(|error| {
                     ConstraintError::InvalidValue {
                         field_name: "environments",
                         candidate: "environment configuration".to_string(),
@@ -96,7 +100,16 @@ pub(super) fn ensure_configs_stay_owner_provided(
 fn validate_environment_config(
     selection: &TurnEnvironmentSelection,
     config: &EnvironmentConfig,
+    features: &ManagedFeatures,
 ) -> CodexResult<()> {
+    if features.enabled(Feature::CodexHooks) {
+        codex_hooks::validate_environment_hooks(
+            &selection.environment_id,
+            &selection.cwd,
+            &config.environment_hooks,
+        )
+        .map_err(|error| CodexErr::InvalidRequest(error.to_string()))?;
+    }
     if let Some(policy) = config.network_policy.as_ref() {
         if selection.environment_id == LOCAL_ENVIRONMENT_ID {
             return Err(CodexErr::InvalidRequest(
@@ -325,7 +338,8 @@ impl Session {
             return Ok(());
         }
         if let Ok(config) = &result {
-            validate_environment_config(selection, config)?;
+            // Return the specific readiness error before applying session-level constraints.
+            validate_environment_config(selection, config, &self.features)?;
         }
         let (current_environment, future_environment) = match environments {
             (None, None) => {
@@ -375,6 +389,11 @@ impl Session {
             }
         }
 
+        if update_future {
+            self.services
+                .turn_environments
+                .update_configured_selections(&future);
+        }
         state.session_configuration.environments = future;
         if update_current {
             // Invalidate MCP before installed configuration can wake a waiting turn.

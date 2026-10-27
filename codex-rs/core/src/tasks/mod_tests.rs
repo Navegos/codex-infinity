@@ -225,6 +225,7 @@ async fn turn_completion_metrics_follow_model_switch(scenario: UsageScenario) {
                     &turn_context,
                     &response_context.initial_settings,
                     Some(&response_usage),
+                    crate::session::TokenUsageContext::Sampling,
                 )
                 .await
                 .expect("response usage should be recorded");
@@ -491,5 +492,75 @@ fn emit_compact_metric_records_auto_local() {
             ("manual".to_string(), "false".to_string()),
             ("type".to_string(), "local".to_string()),
         ])
+    );
+}
+
+struct UncooperativeTimedTask {
+    entered: Arc<tokio::sync::Notify>,
+}
+
+impl SessionTask for UncooperativeTimedTask {
+    fn kind(&self) -> TaskKind {
+        TaskKind::Regular
+    }
+    fn span_name(&self) -> &'static str {
+        "session_task.uncooperative_timing"
+    }
+    async fn run(
+        self: Arc<Self>,
+        _session: Arc<Session>,
+        context: Arc<TurnContext>,
+        _input: Vec<TurnInput>,
+        _cancellation_token: CancellationToken,
+    ) -> SessionTaskResult {
+        let timing = &context.turn_timing_state;
+        timing.enable_critical_path();
+        let batch = codex_direct_tool_timing::ToolBatchTiming::default();
+        let now = std::time::Instant::now();
+        let _blocking;
+        let _work = timing.direct_tool_timings.start_turn_direct_call(
+            "uncooperative",
+            &context.sub_id,
+            batch.clone(),
+            now,
+            timing.snapshot_path(now),
+        );
+        _blocking = timing.begin_tool_blocking(Some(batch));
+        let _review = _work.start_review();
+        self.entered.notify_one();
+        std::future::pending().await
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn hard_abort_drops_timing_guards_before_profile_completion() {
+    let (session, context, _receiver) = make_session_and_context_with_rx().await;
+    let entered = Arc::new(tokio::sync::Notify::new());
+    session
+        .spawn_task(
+            Arc::clone(&context),
+            Vec::new(),
+            UncooperativeTimedTask {
+                entered: Arc::clone(&entered),
+            },
+        )
+        .await;
+    entered.notified().await;
+    session
+        .abort_all_tasks(codex_protocol::protocol::TurnAbortReason::Interrupted)
+        .await;
+    // The task's review and tool guards are gone before abort completion.
+    assert!(
+        context
+            .turn_timing_state
+            .direct_tool_timings
+            .owner_for_turn("uncooperative", &context.sub_id)
+            .is_none()
+    );
+    assert_eq!(
+        context
+            .turn_timing_state
+            .snapshot_path(std::time::Instant::now()),
+        None
     );
 }

@@ -206,6 +206,7 @@ async fn execute_to_terminal(
                         WaitRequest {
                             cell_id,
                             yield_time_ms: 60_000,
+                            max_output_tokens: None,
                         },
                         /*preempt*/ None,
                     )
@@ -270,6 +271,7 @@ async fn interrupt_yields_observations_without_stopping_the_cell() {
     let request = WaitRequest {
         cell_id: cell_id.clone(),
         yield_time_ms: 60_000,
+        max_output_tokens: None,
     };
     let response =
         tokio::time::timeout(Duration::from_secs(5), session.wait(request, Some(signal)))
@@ -288,6 +290,7 @@ async fn interrupt_yields_observations_without_stopping_the_cell() {
             WaitRequest {
                 cell_id,
                 yield_time_ms: 60_000,
+                max_output_tokens: None,
             },
             /*preempt*/ None,
         ),
@@ -350,6 +353,7 @@ async fn session_execution_limits_are_isolated_on_a_shared_process_host() {
             WaitRequest {
                 cell_id: cell_id("1"),
                 yield_time_ms: 60_000,
+                max_output_tokens: None,
             },
             /*preempt*/ None,
         ),
@@ -367,7 +371,7 @@ async fn session_execution_limits_are_isolated_on_a_shared_process_host() {
     );
 
     limited
-        .terminate(cell_id("1"))
+        .terminate(cell_id("1").into())
         .await
         .expect("terminate cell");
     limited.shutdown().await.expect("shutdown limited session");
@@ -401,6 +405,7 @@ async fn remote_session_persists_values_forwards_delegates_and_controls_cells() 
             code_mode_host_duration: actual.code_mode_host_duration(),
             cell_id: cell_id("1"),
             content_items: Vec::new(),
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         }
     );
@@ -431,6 +436,7 @@ text(result.value);
             content_items: vec![FunctionCallOutputContentItem::InputText {
                 text: "output".to_string(),
             }],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         }
     );
@@ -466,6 +472,7 @@ text(result.value);
             WaitRequest {
                 cell_id: cell_id("3"),
                 yield_time_ms: 1,
+                max_output_tokens: None,
             },
             /*preempt*/ None,
         )
@@ -480,7 +487,7 @@ text(result.value);
         })
     );
     let actual = session
-        .terminate(cell_id("3"))
+        .terminate(cell_id("3").into())
         .await
         .expect("terminate cell");
     assert_eq!(
@@ -544,6 +551,7 @@ async fn dropping_long_wait_releases_observer_before_next_wait() {
                 WaitRequest {
                     cell_id: wait_cell_id,
                     yield_time_ms: 60_000,
+                    max_output_tokens: None,
                 },
                 /*preempt*/ None,
             )
@@ -559,6 +567,7 @@ async fn dropping_long_wait_releases_observer_before_next_wait() {
             WaitRequest {
                 cell_id: running_cell_id.clone(),
                 yield_time_ms: 1,
+                max_output_tokens: None,
             },
             /*preempt*/ None,
         ),
@@ -575,7 +584,7 @@ async fn dropping_long_wait_releases_observer_before_next_wait() {
         })
     );
     session
-        .terminate(running_cell_id)
+        .terminate(running_cell_id.into())
         .await
         .expect("terminate cell");
     session.shutdown().await.expect("shutdown remote session");
@@ -650,6 +659,7 @@ return;
                 WaitRequest {
                     cell_id: wait_cell_id,
                     yield_time_ms: 60_000,
+                    max_output_tokens: None,
                 },
                 /*preempt*/ None,
             )
@@ -698,6 +708,7 @@ return;
             content_items: vec![FunctionCallOutputContentItem::InputText {
                 text: "hello".to_string(),
             }],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         })
     );
@@ -741,6 +752,7 @@ async fn oversized_execute_request_does_not_close_the_shared_host() {
             content_items: vec![FunctionCallOutputContentItem::InputText {
                 text: "still alive".to_string(),
             }],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         }
     );
@@ -791,6 +803,7 @@ try {{
             content_items: vec![FunctionCallOutputContentItem::InputText {
                 text: "argument rejected".to_string(),
             }],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         }
     );
@@ -820,6 +833,7 @@ try {
             content_items: vec![FunctionCallOutputContentItem::InputText {
                 text: "result rejected".to_string(),
             }],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         }
     );
@@ -838,6 +852,7 @@ try {
             content_items: vec![FunctionCallOutputContentItem::InputText {
                 text: "still alive".to_string(),
             }],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         }
     );
@@ -884,6 +899,7 @@ async fn oversized_initial_response_does_not_close_the_shared_host() {
             content_items: vec![FunctionCallOutputContentItem::InputText {
                 text: "still alive".to_string(),
             }],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         }
     );
@@ -987,6 +1003,7 @@ async fn child_process_loss_cleans_up_and_rebuilds_the_shared_host() {
                 WaitRequest {
                     cell_id: wait_a_cell,
                     yield_time_ms: 60_000,
+                    max_output_tokens: None,
                 },
                 /*preempt*/ None,
             )
@@ -1000,6 +1017,7 @@ async fn child_process_loss_cleans_up_and_rebuilds_the_shared_host() {
                 WaitRequest {
                     cell_id: wait_b_cell,
                     yield_time_ms: 60_000,
+                    max_output_tokens: None,
                 },
                 /*preempt*/ None,
             )
@@ -1075,6 +1093,7 @@ async fn child_process_loss_cleans_up_and_rebuilds_the_shared_host() {
             content_items: vec![FunctionCallOutputContentItem::InputText {
                 text: "replacement".to_string(),
             }],
+            result_buffered_for: Duration::ZERO,
             error_text: None,
         }
     );
@@ -1083,6 +1102,7 @@ async fn child_process_loss_cleans_up_and_rebuilds_the_shared_host() {
             WaitRequest {
                 cell_id: cell_b.clone(),
                 yield_time_ms: 1,
+                max_output_tokens: None,
             },
             /*preempt*/ None,
         )

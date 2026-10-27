@@ -7,30 +7,35 @@ use crate::exec_policy::prompt_is_rejected_by_policy;
 use crate::function_tool::FunctionCallError;
 use crate::maybe_emit_implicit_skill_invocation;
 use crate::tools::context::ExecCommandToolOutput;
+use crate::tools::context::ToolEnvironments;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
+use crate::tools::handlers::ToolEnvironmentArgs;
 use crate::tools::handlers::apply_granted_turn_permissions;
 use crate::tools::handlers::apply_patch::intercept_apply_patch;
 use crate::tools::handlers::file_system_sandbox_policy_context_for_cwd;
+use crate::tools::handlers::function_tool_environment;
 use crate::tools::handlers::implicit_granted_permissions;
 use crate::tools::handlers::normalize_and_validate_additional_permissions;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::handlers::parse_arguments_with_base_path;
 use crate::tools::handlers::resolve_sandbox_permissions;
-use crate::tools::handlers::resolve_tool_environment;
 use crate::tools::handlers::rewrite_function_string_argument;
+use crate::tools::handlers::selected_executor;
 use crate::tools::handlers::updated_hook_command;
 use crate::tools::hook_names::HookToolName;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::PostToolUsePayload;
 use crate::tools::registry::PreToolUsePayload;
 use crate::tools::registry::ToolExecutor;
+use crate::tools::registry::ToolTelemetryTags;
 use crate::unified_exec::ExecCommandRequest;
 use crate::unified_exec::UnifiedExecContext;
 use crate::unified_exec::UnifiedExecError;
 use crate::unified_exec::UnifiedExecProcessManager;
 use crate::unified_exec::generate_chunk_id;
+use crate::unified_exec::output::CapturedStream;
 use codex_features::Feature;
 use codex_otel::SessionTelemetry;
 use codex_otel::TOOL_CALL_UNIFIED_EXEC_METRIC;
@@ -43,12 +48,13 @@ use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 use codex_utils_output_truncation::approx_token_count;
 use codex_utils_path_uri::PathConvention;
+use codex_utils_path_uri::PathUri;
 use codex_utils_string::truncate_middle_chars;
 
 use super::super::shell_spec::CommandToolOptions;
 use super::super::shell_spec::create_exec_command_tool_with_environment_id;
 use super::ExecCommandArgs;
-use super::ExecCommandEnvironmentArgs;
+use super::ExecCommandWorkdirArgs;
 use super::get_command;
 use super::post_unified_exec_tool_use_payload;
 
@@ -57,8 +63,6 @@ const EXEC_COMMAND_REJECTION_MAX_BYTES: usize = 900;
 
 #[derive(Clone, Copy)]
 pub(crate) struct ExecCommandHandlerOptions {
-    pub(crate) include_login_parameter: bool,
-    pub(crate) include_shell_parameter: bool,
     pub(crate) allow_tty: bool,
     pub(crate) exec_permission_approvals_enabled: bool,
     pub(crate) include_environment_id: bool,
@@ -81,8 +85,6 @@ impl Default for ExecCommandHandler {
         Self {
             lifetime: ExecCommandLifetime::Interactive,
             options: ExecCommandHandlerOptions {
-                include_login_parameter: false,
-                include_shell_parameter: true,
                 allow_tty: true,
                 exec_permission_approvals_enabled: false,
                 include_environment_id: false,
@@ -116,11 +118,9 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
     fn spec(&self) -> ToolSpec {
         let spec = create_exec_command_tool_with_environment_id(
             CommandToolOptions {
-                include_login_parameter: self.options.include_login_parameter,
                 exec_permission_approvals_enabled: self.options.exec_permission_approvals_enabled,
             },
             self.options.include_environment_id,
-            self.options.include_shell_parameter,
             self.options.include_windows_shell_guidance,
         );
         let mut spec = match self.lifetime {
@@ -156,6 +156,7 @@ impl ExecCommandHandler {
         invocation: ToolInvocation,
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
         let ToolInvocation {
+            environments,
             session,
             turn,
             step_context,
@@ -182,22 +183,9 @@ impl ExecCommandHandler {
             cancellation_token,
             call_id.clone(),
         );
-        let environment_args: ExecCommandEnvironmentArgs = parse_arguments(&arguments)?;
-        let turn_environment = resolve_tool_environment(
-            &step_context,
-            environment_args.environment_id.as_deref(),
-            "unified exec is unavailable in this session",
-        )?;
-        let native_environment_cwd = turn_environment.cwd().clone();
-        let cwd = environment_args
-            .workdir
-            .as_deref()
-            .filter(|workdir| !workdir.is_empty())
-            .map_or_else(
-                || Ok(native_environment_cwd.clone()),
-                |workdir| native_environment_cwd.join(workdir),
-            )
-            .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
+        let workdir_args: ExecCommandWorkdirArgs = parse_arguments(&arguments)?;
+        let turn_environment = selected_executor(&environments, &step_context.environments)?;
+        let cwd = workdir_args.resolve_cwd(turn_environment)?;
         let environment = Arc::clone(&turn_environment.environment);
         let fs = environment.get_filesystem();
 
@@ -249,7 +237,7 @@ impl ExecCommandHandler {
         let hook_command = args.cmd.clone();
         maybe_emit_implicit_skill_invocation(
             session.as_ref(),
-            context.step_context.turn.as_ref(),
+            context.step_context.as_ref(),
             &hook_command,
             &cwd,
             native_cwd.as_ref(),
@@ -380,14 +368,17 @@ impl ExecCommandHandler {
                 event_call_id: String::new(),
                 chunk_id: String::new(),
                 wall_time: std::time::Duration::ZERO,
-                raw_output: output.into_text().into_bytes(),
+                raw_output: CapturedStream {
+                    text: output.into_text(),
+                    omitted_bytes: 0,
+                },
                 truncation_policy: step_context.settings.model_info.truncation_policy.into(),
                 max_output_tokens,
                 process_id: None,
                 exit_code: None,
                 original_token_count: None,
-                output_omitted_bytes: None,
                 hook_command: None,
+                tool_cwd: None,
             }));
         }
 
@@ -410,8 +401,8 @@ impl ExecCommandHandler {
             process_id,
             yield_time_ms,
             max_output_tokens,
-            cwd,
-            sandbox_cwd: native_environment_cwd,
+            cwd: cwd.clone(),
+            sandbox_cwd: turn_environment.cwd().clone(),
             turn_environment: turn_environment.clone(),
             network: context.step_context.turn.network.clone(),
             tty,
@@ -444,7 +435,10 @@ impl ExecCommandHandler {
                     event_call_id: context.call_id.clone(),
                     chunk_id: generate_chunk_id(),
                     wall_time: output.duration,
-                    raw_output: output_text.into_bytes(),
+                    raw_output: CapturedStream {
+                        text: output_text,
+                        omitted_bytes: output_omitted_bytes.map_or(0, std::num::NonZeroUsize::get),
+                    },
                     truncation_policy: step_context.settings.model_info.truncation_policy.into(),
                     max_output_tokens,
                     // Sandbox denial is terminal, so there is no live
@@ -452,8 +446,8 @@ impl ExecCommandHandler {
                     process_id: None,
                     exit_code: Some(output.exit_code),
                     original_token_count: Some(original_token_count),
-                    output_omitted_bytes,
                     hook_command: Some(hook_command),
+                    tool_cwd: (!turn_environment.environment.is_remote()).then_some(cwd),
                 }))
             }
             Err(err) => {
@@ -499,6 +493,26 @@ fn one_shot_exec_command_spec(spec: ToolSpec) -> ToolSpec {
 }
 
 impl CoreToolRuntime for ExecCommandHandler {
+    fn telemetry_tags(&self, invocation: &ToolInvocation) -> ToolTelemetryTags {
+        // Record the configured mode so fallback calls remain in their rollout cohort.
+        // This does not indicate whether the command actually used a snapshot.
+        let mode = if invocation.session.enabled(Feature::ShellSnapshotV2) {
+            "v2"
+        } else if invocation.session.enabled(Feature::ShellSnapshot) {
+            "v1"
+        } else {
+            "disabled"
+        };
+        vec![("shell_snapshot_mode", mode.to_string())]
+    }
+
+    fn environments_for_input(
+        &self,
+        invocation: &ToolInvocation,
+    ) -> Result<ToolEnvironments, FunctionCallError> {
+        function_tool_environment(invocation, |args: ToolEnvironmentArgs| args.environment_id)
+    }
+
     fn matches_kind(&self, payload: &ToolPayload) -> bool {
         matches!(payload, ToolPayload::Function { .. })
     }
@@ -514,6 +528,24 @@ impl CoreToolRuntime for ExecCommandHandler {
                 tool_name: HookToolName::bash(),
                 tool_input: serde_json::json!({ "command": args.cmd }),
             })
+    }
+
+    fn pre_tool_use_cwd(
+        &self,
+        invocation: &ToolInvocation,
+    ) -> Result<Option<PathUri>, FunctionCallError> {
+        let ToolPayload::Function { arguments } = &invocation.payload else {
+            return Ok(None);
+        };
+        let args: ExecCommandWorkdirArgs = parse_arguments(arguments)?;
+        let environment = selected_executor(
+            &invocation.environments,
+            &invocation.step_context.environments,
+        )?;
+        let cwd = args.resolve_cwd(environment)?;
+        // Hook scripts execute on the host. Remote command paths cannot replace
+        // the host cwd in hook input, even when both machines use the same OS.
+        Ok((!environment.environment.is_remote()).then_some(cwd))
     }
 
     fn with_updated_hook_input(
